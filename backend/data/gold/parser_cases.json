@@ -1,0 +1,44 @@
+{
+  "_comment": "Parser gold set. Every case is a sentence plus the slots that MUST be recovered. Cases marked regression=true correspond to a defect observed in Seminar 1.",
+  "today": "2026-11-12",
+  "cases": [
+    {
+      "text": "cloud free NDVI of the Sundarbans in March 2024",
+      "expect": { "place": "the Sundarbans", "index": "ndvi", "max_cloud": 5.0, "date_from": "2024-03-01" }
+    },
+    {
+      "text": "last summer vegetation over Kashmir",
+      "expect": { "index": "ndvi", "date_from": "2025-06-01", "date_to": "2025-08-31" }
+    },
+    {
+      "text": "Tokyo June 2024 under 20% cloud",
+      "expect": { "place": "Tokyo", "max_cloud": 20.0, "date_from": "2024-06-01", "date_to": "2024-06-30" },
+      "regression": true,
+      "bug": "place string kept the month token, which geocoded to an unrelated business"
+    },
+    {
+      "text": "Sentinel-2 NDWI over Chilika lake last month",
+      "expect": { "index": "ndwi", "mission": "sentinel-2-l2a", "date_from": "2026-10-13" }
+    },
+    {
+      "text": "wildfire burn severity in Uttarakhand 2023",
+      "expect": { "index": "nbr", "date_from": "2023-01-01", "date_to": "2023-12-31" }
+    },
+    {
+      "text": "urban growth around Bengaluru this year",
+      "expect": { "index": "ndbi", "date_from": "2026-01-01", "date_to": "2026-12-31" }
+    },
+    {
+      "text": "march to may this year over Punjab",
+      "expect": { "date_from": "2026-03-01", "date_to": "2026-05-31" }
+    },
+    {
+      "text": "2019 to 2021 glacier change",
+      "expect": { "date_from": "2019-01-01", "date_to": "2021-12-31" }
+    },
+    {
+      "text": "vegetation index last summer",
+      "expect": { "index": "ndvi", "place": null }
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "_comment": "Reference measurements captured live from the ArcGIS Sentinel-2 ImageServer on 2026-11-12. The service holds a ROLLING ~14-month window updated daily, so values drift by design. Tolerance is therefore wide; this file checks plumbing and plausibility, not bit-exact reproduction.",
+  "probe_date": "2026-11-12",
+  "bbox": [78.3, 17.3, 78.6, 17.5],
+  "bbox_area_km2_expected": 708,
+  "ndvi": {
+    "raster_function": "NDVI Raw",
+    "min": -0.26677,
+    "max": 0.51638,
+    "mean": 0.12966,
+    "std": 0.09229,
+    "count": 7792220,
+    "tolerance": {
+      "mean_abs": 0.25,
+      "min_abs": 0.5,
+      "max_abs": 0.5
+    }
+  },
+  "cloudcover_units": {
+    "decision": "percent (0-100)",
+    "discriminating_counts": {
+      "cloudcover<1": 4648959,
+      "cloudcover<20": 4951994,
+      "cloudcover<100": 4951994
+    },
+    "reasoning": "A 0-1 fraction would make all three counts identical, because essentially no scene exceeds 1.0 of a fraction. They are not identical: <1 excludes about 302k records and <20 equals <100 (the whole catalogue). Hence percent.",
+    "observed_sample_values": [0.0058, 0.0093, 0.3733, 0.4626],
+    "note": "Sub-1-percent values are common here; the UI shows them with two decimals so they do not appear as 0.0%.",
+    "unused_sibling_field": "scene_cloud (alias Scene_Cloud) also exists; the adapters do not use it."
+  },
+  "service_facts": {
+    "pixel_type": "U16",
+    "band_count": 13,
+    "max_image_size": 4000,
+    "supports_advanced_queries": true,
+    "lossless_export": false,
+    "rolling_window_days": 425,
+    "note": "advertised in metadata as 'imagery collected within the past 14 months', updated daily"
+  },
+  "raster_functions_verified": [
+    "NDVI Raw",
+    "NDVI Colormap",
+    "NDWI Raw",
+    "Normalized Burn Ratio",
+    "Normalized Difference Built-Up Index (NDBI)",
+    "Natural Color",
+    "Color Infrared",
+    "Agriculture",
+    "Geology",
+    "SWIR",
+    "Bathymetric"
+  ],
+  "earth_search_quirks": {
+    "datetime_short_form": "HTTP 400 'datetime value is invalid, does not match RFC3339 format'",
+    "datetime_correct_form": "2024-06-01T00:00:00Z/2024-06-30T23:59:59Z -> HTTP 200",
+    "cql2_filter": "accepted but SILENTLY IGNORED (returned 96.7% cloud under a <20 filter)",
+    "query_extension": "works; {\"eo:cloud_cover\": {\"lt\": 20}} returned only 4.1% and 4.2% cloud scenes"
+  }
+}
