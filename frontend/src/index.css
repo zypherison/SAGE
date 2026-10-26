@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0b1020;
+  color: #e6ecf7;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Leaflet: dark basemap needs light controls */
+.leaflet-container {
+  background: #0b1020;
+  font-family: inherit;
+}
+.leaflet-control-zoom a {
+  background: #121a2c;
+  color: #cfe0ff;
+  border-color: #1e2a44;
+}
+.leaflet-control-zoom a:hover {
+  background: #1b2740;
+  color: #fff;
+}
+.leaflet-control-attribution {
+  background: rgba(11, 16, 32, 0.75) !important;
+  color: #7d8aa5 !important;
+  font-size: 10px;
+}
+.leaflet-control-attribution a {
+  color: #8fb4ff !important;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #223152;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2e4270;
+}
