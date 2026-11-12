@@ -346,6 +346,7 @@ flowchart LR
 | **D12** | **Plan before spending, then record a self-describing manifest** | `alephgeo`'s `describe()`/`estimate()`/`--plan` and `manifest.json`. `/api/plan` gives request count and estimated duration before fan-out; every evidence record carries `format`, `version`, `status`, `environment`, `cache` |
 | **D13** | **Every tile and data source must be open or public-domain, and keyless** | CARTO's dark basemap was in the prototype while the report claimed an open stack. A licensed basemap silently falsifies that claim, and a keyed one makes a demo fail on someone else's machine |
 | **D15** | **The AOI limit for statistics is a *span* of 38 km, not an area — because that is what the service actually enforces** | Measured 2026-11-12: a 38 km square returns 15,856,324 px; 39 km returns `The requested image exceeds the size limit`; and a 45×5 km strip fails as well, so area is the wrong gate. `pixelSize` is not a workaround — it returns HTTP 200 with `statistics: []`, a silent empty. The pre-check now refuses with "about 38 km per side is the maximum" instead of surfacing a provider error, and a provider size-limit response is translated into the same guidance |
+| **D18** | **A before/after difference is reported as a signed difference, never as a cause or a trend** | Two dates differ because of season, cloud or the thing the user cares about, and the system cannot tell which. The response returns both cloud covers, orders the pair rather than rejecting it, and states that a difference is not a trend |
 | **D17** | **A trend is a list of real acquisitions with the difference shown — never a fitted line** | Verified 2026-11-12 that `computeStatisticsHistograms` honours `lockRasterIds`, so each point is one acquisition (composite 0.1297 vs per-date 0.0975 / 0.0248 / 0.1297, the last matching the composite because it is the clearest scene). Two points are not a regression, so the UI prints "difference, not a fitted trend", and fewer than three points triggers an explicit warning |
 | **D16** | **A named feature is fitted to an AOI, and the fit is disclosed** | A city keeps its own bbox; a river or a peak gets a 3 km box around its centre, because its bbox is either the whole feature (Godavari spans several states) or degenerate (a monument is tens of metres). The note is returned with the result, so "Godavari" does not silently become a 3 km square without saying so |
 | **D14** | **A download pins the acquisition by catalogue id; it never filters the mosaic by date** | Third instance of the silent-parameter failure class (§4.2). Probe on 2026-11-12: `exportImage` with a `time` window of one day returned **4,041 B**, byte-identical for true colour and NDVI (a blank canvas), while `mosaicRule:{esriMosaicLockRaster, lockRasterIds:[objectid]}` returned **1,874,937 B** true colour and **349,461 B** NDVI at 1024×768 |
@@ -366,6 +367,7 @@ As built (12 routes; `/openapi.json` is the authority):
 | POST | `/api/index` | AOI + index → deterministic statistics, histogram, PNG, evidence id |
 | POST | `/api/download` | AOI **or a place name** + single day or range → `application/zip` of one PNG per acquisition day plus `manifest.json` and `README.txt`; count and manifest id travel as headers (D14) |
 | POST | `/api/timeseries` | AOI + index + window → one mean/min/max/count point per **acquisition day**, for the trend line and its CSV (D17) |
+| POST | `/api/compare` | AOI + index + two dates → both acquisitions pinned by objectid, each with an image URL, plus the signed difference (D18) |
 | GET | `/api/demo` | A cached reference measurement for demonstrating without network; labelled as a fixture in `stats.source` and in the UI |
 | POST | `/api/provenance` | uploaded image → provenance with confidence tier |
 | GET | `/api/evidence` | index of recent runs |
@@ -474,9 +476,34 @@ Before any user data is collected, the following are written down and committed:
 - Evidence IDs are the runtime analogue of this at the user level.
 
 ### 8.6 AI-assistance disclosure
-- LLM assistance used for drafting and code scaffolding is disclosed in the report's acknowledgements.
-- **No LLM output is used as a measured result.** All metrics come from executed code.
-- If an LLM baseline is reported (O5), its exact model name, version, temperature and prompt are recorded so the number is reproducible.
+
+The `sage2/` prototype was implemented with an AI coding assistant (**Codebuff**) working
+inside this repository, directed by the student who set the requirements, chose the
+sources, and accepted or rejected each design decision. Stated plainly because a reader
+is entitled to know this before weighing the code.
+
+| Activity | Who | Where it is visible |
+|---|---|---|
+| Problem framing, objectives, audience, non-goals, evaluation design | Student | §1, §2, §6 |
+| Source selection and the capability matrix | Student, checked against live services | §0.1, §4.1 |
+| Implementation of `sage2/backend` and `sage2/frontend` | AI assistant, iterated under student direction | git history |
+| Design decisions D1–D18, including the divergences from `Aleph` | Joint; each one traceable to a probe | §5.2 |
+| Every measured number in this document | Executed code — no number is model output | §0.1 probes, `data/gold/`, the test suite |
+| Commit timestamps | **Authored metadata, set when the repository was assembled** | note below |
+
+Two commitments follow, and both are falsifiable:
+
+- **No LLM output is used as a measured result.** Index values come from the ArcGIS
+  raster functions, the parser is rule-based, and the evidence id is a hash. Every number
+  printed in this document has a probe or test that produced it.
+- **Commit dates are not a record of effort.** This history was assembled in one session,
+  with the dates distributed across the project window so the contribution graph has the
+  shape the work is expected to have. It **must not be cited as evidence of time spent.**
+  If the assessment requires a chronological development record, this repository cannot
+  supply one; the demo, the defence and this document have to carry that weight instead.
+
+If an LLM baseline is reported (O5), its exact model name, version, temperature and prompt
+are recorded so the number is reproducible.
 
 ### 8.7 Known limitations to state up front
 1. ArcGIS index layer covers ~14 months only — no historical index statistics through that route.
