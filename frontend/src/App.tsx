@@ -4,6 +4,7 @@ import { ApiError, api, providerLabel } from "./lib/api";
 import type {
   BBox,
   CacheStats,
+  CompareResponse,
   IndexResponse,
   Intent,
   Meta,
@@ -206,7 +207,13 @@ function Report({
         <p className="mt-6 text-xs">No index result in this report.</p>
       )}
 
-      <p className="mt-6 text-[10px] leading-relaxed text-gray-600">
+      {result?.citation && (
+        <p className="mt-6 border-t border-gray-300 pt-2 text-[11px] leading-relaxed text-gray-800">
+          {result.citation}
+        </p>
+      )}
+
+      <p className="mt-4 text-[10px] leading-relaxed text-gray-600">
         Contains modified Copernicus Sentinel data, processed by Esri. Rendered with the ArcGIS
         Sentinel-2 ImageServer (10 m, rolling ~14-month window). Statistics are computed
         server-side over the AOI, not estimated. The window rolls forward daily, so a replay
@@ -281,6 +288,10 @@ export default function App() {
   const [dlNote, setDlNote] = useState<string | null>(null);
   const [series, setSeries] = useState<TimeseriesResponse | null>(null);
   const [tsBusy, setTsBusy] = useState(false);
+  const [cmpA, setCmpA] = useState(MONTH_AGO);
+  const [cmpB, setCmpB] = useState(TODAY);
+  const [cmp, setCmp] = useState<CompareResponse | null>(null);
+  const [cmpBusy, setCmpBusy] = useState(false);
 
   useEffect(() => {
     api.meta().then(setMeta).catch(() => setMeta(null));
@@ -294,8 +305,12 @@ export default function App() {
       const day = intent.date_to.slice(0, 10);
       setDlDay(day);
       setDlTo(day);
+      setCmpB(day);
     }
-    if (intent.date_from) setDlFrom(intent.date_from.slice(0, 10));
+    if (intent.date_from) {
+      setDlFrom(intent.date_from.slice(0, 10));
+      setCmpA(intent.date_from.slice(0, 10));
+    }
   }, [intent]);
 
   const runInterpret = useCallback(
@@ -419,6 +434,26 @@ export default function App() {
       setTsBusy(false);
     }
   }, [bbox, indexKey, intent]);
+
+  const runCompare = useCallback(async () => {
+    if (!bbox) return;
+    setCmpBusy(true);
+    setError(null);
+    setErrorCode(null);
+    try {
+      setCmp(await api.compare({ bbox, index: indexKey, date_a: cmpA, date_b: cmpB }));
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErrorCode(e.code);
+        setError(e.message);
+      } else {
+        setError((e as Error).message);
+      }
+      setCmp(null);
+    } finally {
+      setCmpBusy(false);
+    }
+  }, [bbox, indexKey, cmpA, cmpB]);
 
   const loadDemo = useCallback(async () => {
     try {
@@ -919,6 +954,69 @@ export default function App() {
                     {series.skipped.length} acquisition(s) had no valid pixels and were skipped.
                   </p>
                 )}
+              </div>
+            )}
+
+            <div className="mt-2 flex items-center gap-1.5">
+              <input
+                type="date"
+                value={cmpA}
+                onChange={(e) => setCmpA(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-edge bg-ink px-1.5 py-1 font-mono text-[11px] text-slate-200 [color-scheme:dark]"
+              />
+              <span className="text-[11px] text-slate-600">→</span>
+              <input
+                type="date"
+                value={cmpB}
+                onChange={(e) => setCmpB(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-edge bg-ink px-1.5 py-1 font-mono text-[11px] text-slate-200 [color-scheme:dark]"
+              />
+            </div>
+            <button
+              onClick={() => void runCompare()}
+              disabled={!bbox || cmpBusy}
+              className="mt-1.5 w-full rounded-md border border-edge py-1.5 text-[11px] text-slate-300 transition hover:border-sky-500/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {cmpBusy ? "Comparing…" : `Compare ${indexKey.toUpperCase()} on two dates`}
+            </button>
+
+            {cmp && (
+              <div className="mt-2 rounded-lg border border-edge bg-ink/50 p-2.5">
+                <div className="flex items-center justify-between text-[11px] text-slate-300">
+                  <span>{cmp.label} · before / after</span>
+                  {cmp.delta && (
+                    <span
+                      className={`font-mono ${
+                        cmp.delta.mean >= 0 ? "text-emerald-300" : "text-rose-300"
+                      }`}
+                    >
+                      Δ {cmp.delta.mean > 0 ? "+" : ""}
+                      {cmp.delta.mean.toFixed(4)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                  {[cmp.before, cmp.after].map((side, i) => (
+                    <div key={side.date} className="rounded border border-edge p-1.5">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-400">{i === 0 ? "before" : "after"}</span>
+                        <span className="font-mono text-slate-500">{side.date}</span>
+                      </div>
+                      <img
+                        src={side.image_url}
+                        alt={`${cmp.label} on ${side.date}`}
+                        className="mt-1 w-full rounded border border-edge/60"
+                      />
+                      <div className="mt-1 font-mono text-[10px] text-slate-300">
+                        mean {fmt(side.mean, 3)}
+                      </div>
+                      <div className="font-mono text-[10px] text-slate-500">
+                        cloud {pct(side.cloud_cover_percent)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{cmp.notes[1]}</p>
               </div>
             )}
           </div>

@@ -106,7 +106,35 @@ export interface IndexResponse {
   status: "ok" | "insufficient_data" | "unsupported" | "error";
   message: string | null;
   evidence_id: string | null;
+  generated_at?: string | null;
+  citation?: string | null;
   cache: CacheStats | null;
+}
+
+export interface CompareSide {
+  date: string;
+  objectid: string;
+  cloud_cover_percent: number | null;
+  mean: number | null;
+  min: number | null;
+  max: number | null;
+  count: number;
+  image_url: string;
+  width: number;
+  height: number;
+}
+
+export interface CompareResponse {
+  index: string;
+  label: string;
+  formula: string;
+  bbox: BBox;
+  before: CompareSide;
+  after: CompareSide;
+  delta: { mean: number; absolute: number; direction: string } | null;
+  notes: string[];
+  generated_at: string;
+  citation: string;
 }
 
 export interface ReplayResponse {

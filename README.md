@@ -20,6 +20,8 @@ The planning document that this implements is [`SEMINAR2.md`](SEMINAR2.md).
    one-page report (Print / Save as PDF) carrying the statistics, image, evidence id and citation.
 8. Serves `/api/demo`, a cached reference measurement, so a demonstration survives a dead
    network. It is labelled as a fixture in `stats.source` and in the UI, never as live data.
+9. Compares two dates side by side — two pinned acquisitions, two images, a signed difference —
+   and puts a copy-ready citation line (`Sentinel-2 L2A … accessed <date>`) in the printed report.
 
 ## Requirements
 
@@ -87,12 +89,13 @@ sage2/
         discovery.py       plan, fan-out, dedupe, ranking
         download.py        one-click imagery zip + provenance manifest
         timeseries.py      one index point per acquisition day
+        compare.py         two dates, two pinned acquisitions, one difference
         indices.py         deterministic index engine + QC gates
         evidence.py        evidence manifests + replay comparison
         provenance.py      image provenance cascade
         providers/         earth_search.py, planetary.py, arcgis.py
     data/gold/             live reference fixtures
-    tests/                 101 offline tests
+    tests/                 107 offline tests
   frontend/
     src/App.tsx            single screen
     src/components/MapView.tsx  Leaflet + drag-to-draw AOI

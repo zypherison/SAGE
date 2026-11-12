@@ -155,6 +155,9 @@ class IndexResponse(BaseModel):
     status: str = "ok"  # ok | insufficient_data | unsupported | error
     message: str | None = None
     evidence_id: str | None = None
+    # Provenance for a printed figure: when it was produced, and a copy-ready line.
+    generated_at: str | None = None
+    citation: str | None = None
     cache: CacheStats | None = None
 
 
@@ -172,6 +175,17 @@ class DownloadRequest(BaseModel):
     max_cloud: float | None = 40.0
     place_id: str | None = None
     best_match: bool = False
+
+
+class CompareRequest(BaseModel):
+    """Two dates, one AOI; each side pinned to a single acquisition."""
+
+    bbox: list[float] | None = None
+    geometry: dict[str, Any] | None = None
+    index: str = "ndvi"
+    date_a: str
+    date_b: str
+    max_cloud: float | None = 40.0
 
 
 class TimeseriesRequest(BaseModel):

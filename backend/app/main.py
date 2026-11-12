@@ -32,6 +32,7 @@ from app.errors import (
 )
 from app.schemas import (
     CacheStats,
+    CompareRequest,
     DownloadRequest,
     IndexRequest,
     IndexResponse,
@@ -47,6 +48,7 @@ from app.schemas import (
     TimeseriesRequest,
 )
 from app.services import (
+    compare,
     discovery,
     download,
     evidence,
@@ -84,6 +86,15 @@ async def connection():
     """One pooled, paced, cached HTTP session per request."""
     async with httpx.AsyncClient(headers={"User-Agent": config.USER_AGENT}) as client:
         yield Fetch(client)
+
+
+def _citation(accessed: datetime) -> str:
+    """A copy-ready reference line for a printed figure (§8.1)."""
+    return (
+        "Sentinel-2 L2A (10 m), ArcGIS Sentinel-2 ImageServer, rolling ~14-month "
+        f"mosaic; accessed {accessed.date().isoformat()}. "
+        "Contains modified Copernicus Sentinel data, processed by Esri."
+    )
 
 
 def _resolve_bbox(bbox: list[float] | None, geometry: dict[str, Any] | None) -> list[float]:
@@ -338,6 +349,9 @@ async def index_endpoint(req: IndexRequest) -> IndexResponse:
             },
             cache=cache,
         )
+    accessed = datetime.now(timezone.utc)
+    result["generated_at"] = accessed.isoformat()
+    result["citation"] = _citation(accessed)
     result["cache"] = cache
     return IndexResponse(**result)
 
@@ -366,6 +380,25 @@ async def timeseries_endpoint(req: TimeseriesRequest) -> dict[str, Any]:
             max_points=req.max_points,
             max_cloud=req.max_cloud,
         )
+
+
+@app.post("/api/compare")
+async def compare_endpoint(req: CompareRequest) -> dict[str, Any]:
+    """Two dates, two pinned acquisitions, one difference."""
+    bbox = _resolve_bbox(req.bbox, req.geometry)
+    async with connection() as fetch:
+        result = await compare.build(
+            fetch,
+            bbox=bbox,
+            index=req.index,
+            date_a=req.date_a,
+            date_b=req.date_b,
+            max_cloud=req.max_cloud,
+        )
+    accessed = datetime.now(timezone.utc)
+    result["generated_at"] = accessed.isoformat()
+    result["citation"] = _citation(accessed)
+    return result
 
 
 @app.get("/api/demo")

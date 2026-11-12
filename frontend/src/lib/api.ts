@@ -1,6 +1,7 @@
 import type {
   BBox,
   CacheStats,
+  CompareResponse,
   DownloadParams,
   IndexResponse,
   Meta,
@@ -119,6 +120,12 @@ export const api = {
         date_to: params.date_to ?? null,
         max_points: params.max_points ?? 10,
       }),
+    }),
+
+  compare: (params: { bbox: BBox; index: string; date_a: string; date_b: string }) =>
+    request<CompareResponse>("/api/compare", {
+      method: "POST",
+      body: JSON.stringify(params),
     }),
 
   /** A cached fixture, for demonstrating without network access. */

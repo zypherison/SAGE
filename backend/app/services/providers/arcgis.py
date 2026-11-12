@@ -217,6 +217,46 @@ async def index_statistics(
     }
 
 
+def export_params(
+    bbox: list[float],
+    *,
+    objectid: str | None = None,
+    rendering_rule: str | None = None,
+    size: tuple[int, int] = (1024, 768),
+) -> dict[str, Any]:
+    """Query parameters for one `exportImage` render (shared by URL and bytes)."""
+    params: dict[str, Any] = {
+        "bbox": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
+        "bboxSR": "4326",
+        "imageSR": "4326",
+        "size": f"{int(size[0])},{int(size[1])}",
+        "format": "png",
+        "f": "image",
+    }
+    if objectid:
+        ids: list[Any] = [int(objectid)] if str(objectid).isdigit() else [objectid]
+        params["mosaicRule"] = json.dumps(
+            {"mosaicMethod": "esriMosaicLockRaster", "lockRasterIds": ids}
+        )
+    if rendering_rule:
+        params["renderingRule"] = json.dumps({"rasterFunction": rendering_rule})
+    return params
+
+
+def scene_url(
+    bbox: list[float],
+    *,
+    objectid: str,
+    rendering_rule: str | None = None,
+    size: tuple[int, int] = (1024, 768),
+) -> str:
+    """Direct PNG URL for one pinned acquisition, for the before/after panels."""
+    query = urllib.parse.urlencode(
+        export_params(bbox, objectid=objectid, rendering_rule=rendering_rule, size=size)
+    )
+    return f"{config.ARCGIS_URL}/exportImage?{query}"
+
+
 async def export_scene(
     fetch: Fetch,
     *,
@@ -234,20 +274,9 @@ async def export_scene(
     catalogue id of the rendered acquisition is recorded in the download
     manifest. See app/services/download.py.
     """
-    ids: list[Any] = [int(objectid)] if str(objectid).isdigit() else [objectid]
-    params: dict[str, Any] = {
-        "bbox": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
-        "bboxSR": "4326",
-        "imageSR": "4326",
-        "size": f"{int(size[0])},{int(size[1])}",
-        "format": "png",
-        "f": "image",
-        "mosaicRule": json.dumps(
-            {"mosaicMethod": "esriMosaicLockRaster", "lockRasterIds": ids}
-        ),
-    }
-    if rendering_rule:
-        params["renderingRule"] = json.dumps({"rasterFunction": rendering_rule})
+    params = export_params(
+        bbox, objectid=objectid, rendering_rule=rendering_rule, size=size
+    )
 
     blob, _cached = await fetch.get_bytes(f"{config.ARCGIS_URL}/exportImage", params=params)
     if blob[:1] == b"{":
