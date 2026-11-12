@@ -113,6 +113,8 @@ export interface IndexResponse {
 
 export interface CompareSide {
   date: string;
+  requested_date: string;
+  substituted: boolean;
   objectid: string;
   cloud_cover_percent: number | null;
   mean: number | null;

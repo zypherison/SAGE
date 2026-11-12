@@ -13,13 +13,66 @@ change as a trend or a cause.
 """
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from typing import Any
 
+from app import config
 from app.errors import INVALID_ARGUMENTS, NO_IMAGERY, AppError
 from app.services import indices
-from app.services.download import acquisitions, export_size
+from app.services.download import export_size
 from app.services.net import Fetch
 from app.services.providers import arcgis
+
+
+async def _nearest(
+    fetch: Fetch,
+    *,
+    bbox: list[float],
+    day: str,
+    max_cloud: float | None,
+    window_days: int,
+) -> tuple[Any, str]:
+    """The acquisition closest to the requested day, within a few days.
+
+    Imagery lags by a day or two, so a literal "today" has no overpass and an
+    exact-day lookup dead-ends the user for no useful reason. Snapping a short
+    distance and reporting the date actually used is both simpler and more
+    truthful than pretending the requested date exists.
+    """
+    requested = date.fromisoformat(day)
+    scenes = await arcgis.search(
+        fetch,
+        bbox=bbox,
+        geometry=None,
+        date_from=(requested - timedelta(days=window_days)).isoformat(),
+        date_to=(requested + timedelta(days=window_days)).isoformat(),
+        max_cloud=max_cloud,
+        mission="sentinel-2-l2a",
+        limit=config.MAX_LIMIT,
+    )
+
+    best: dict[str, tuple[date, Any]] = {}
+    for scene in scenes:
+        if not scene.datetime:
+            continue
+        try:
+            scene_day = datetime.fromisoformat(scene.datetime.replace("Z", "+00:00")).date()
+        except ValueError:
+            continue
+        key = scene_day.isoformat()
+        current = best.get(key)
+        if current is None or (scene.cloud_cover or 999) < (current[1].cloud_cover or 999):
+            best[key] = (scene_day, scene)
+
+    if not best:
+        raise AppError(
+            NO_IMAGERY,
+            f"No Sentinel-2 acquisition within {window_days} days of {day}. Pick a date "
+            "inside the ~14-month window, or widen the cloud tolerance.",
+        )
+
+    scene_day, scene = min(best.values(), key=lambda item: abs((item[0] - requested).days))
+    return scene, scene_day.isoformat()
 
 
 async def _one(
@@ -31,46 +84,37 @@ async def _one(
     max_cloud: float | None,
     rendering: str | None,
     size: tuple[int, int],
+    window_days: int,
 ) -> dict[str, Any]:
-    picks = await acquisitions(
-        fetch,
-        bbox=bbox,
-        date_from=day,
-        date_to=day,
-        max_cloud=max_cloud,
-        max_images=1,
+    pick, actual_day = await _nearest(
+        fetch, bbox=bbox, day=day, max_cloud=max_cloud, window_days=window_days
     )
-    if not picks:
-        raise AppError(
-            NO_IMAGERY,
-            f"No Sentinel-2 acquisition covers this AOI on {day}. Pick another date "
-            "inside the ~14-month window, or widen the cloud tolerance.",
-        )
 
-    pick = picks[0]
     stats = await arcgis.index_statistics(
         fetch,
         bbox=bbox,
         raster_function=str(spec["arcgis_function"]),
-        objectid=pick.objectid,
+        objectid=pick.id,
     )
     if not stats or not stats.get("count"):
-        raise AppError(NO_IMAGERY, f"The acquisition on {day} has no valid pixels over this AOI.")
+        raise AppError(NO_IMAGERY, f"The acquisition on {actual_day} has no valid pixels over this AOI.")
 
     def value(key: str) -> float | None:
         raw = stats.get(key)
         return None if raw is None else float(raw)
 
     return {
-        "date": day,
-        "objectid": pick.objectid,
+        "date": actual_day,
+        "requested_date": day,
+        "substituted": actual_day != day,
+        "objectid": pick.id,
         "cloud_cover_percent": pick.cloud_cover,
         "mean": value("mean"),
         "min": value("min"),
         "max": value("max"),
         "count": int(stats.get("count") or 0),
         "image_url": arcgis.scene_url(
-            bbox, objectid=pick.objectid, rendering_rule=rendering, size=size
+            bbox, objectid=pick.id, rendering_rule=rendering, size=size
         ),
         "width": size[0],
         "height": size[1],
@@ -103,10 +147,12 @@ async def build(
     before = await _one(
         fetch, bbox=bbox, spec=spec, day=date_a,
         max_cloud=max_cloud, rendering=rendering, size=size,
+        window_days=config.COMPARE_WINDOW_DAYS,
     )
     after = await _one(
         fetch, bbox=bbox, spec=spec, day=date_b,
         max_cloud=max_cloud, rendering=rendering, size=size,
+        window_days=config.COMPARE_WINDOW_DAYS,
     )
 
     delta = None
@@ -123,6 +169,12 @@ async def build(
         "A difference between two dates is not a trend and does not identify a cause; "
         "seasonality and cloud cover can both move it.",
     ]
+    for side, label in ((before, "before"), (after, "after")):
+        if side["substituted"]:
+            notes.append(
+                f"The {label} date {side['requested_date']} had no overpass; used the "
+                f"nearest acquisition, {side['date']}."
+            )
     if delta is None:
         notes.append("One side had no usable pixels, so no difference is reported.")
     clouds = [side["cloud_cover_percent"] for side in (before, after)]

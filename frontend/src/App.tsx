@@ -1000,7 +1000,9 @@ export default function App() {
                     <div key={side.date} className="rounded border border-edge p-1.5">
                       <div className="flex items-center justify-between text-[10px]">
                         <span className="text-slate-400">{i === 0 ? "before" : "after"}</span>
-                        <span className="font-mono text-slate-500">{side.date}</span>
+                        <span className="font-mono text-slate-500">
+                          {side.substituted ? `${side.requested_date} → ${side.date}` : side.date}
+                        </span>
                       </div>
                       <img
                         src={side.image_url}
@@ -1016,7 +1018,13 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{cmp.notes[1]}</p>
+                <ul className="mt-1 space-y-0.5">
+                  {cmp.notes.map((note, i) => (
+                    <li key={i} className="text-[10px] leading-relaxed text-slate-600">
+                      · {note}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>

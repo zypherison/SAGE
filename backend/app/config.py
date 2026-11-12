@@ -85,6 +85,11 @@ DOWNLOAD_MIN_BYTES = int(env("SAGE_DOWNLOAD_MIN_BYTES", "6000"))
 # One statistics call per point, so the cap is about requests, not file size.
 TIMESERIES_MAX_POINTS = int(env("SAGE_TIMESERIES_MAX_POINTS", "10"))
 
+# Imagery lags a day or two, so a literal "today" has no overpass. A comparison
+# snaps each side to the nearest acquisition inside this window and reports the
+# date it actually used.
+COMPARE_WINDOW_DAYS = int(env("SAGE_COMPARE_WINDOW_DAYS", "7"))
+
 # --------------------------------------------------------------------------
 # Index definitions: our name -> (formula label, ArcGIS raster function, bands)
 # Raster function names verified against the service's rasterFunctionInfos list.
