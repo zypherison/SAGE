@@ -19,6 +19,12 @@ Request and response shapes follow the published examples:
 
 The AOI defaults to Hussain Sagar, the same box the seminar document reports on,
 so a future run can be compared with the numbers already recorded.
+
+Credentials: this API uses OAuth2 client credentials, so it needs a **client ID
+plus the client secret** from an OAuth client created in Dashboard -> User
+Settings -> OAuth clients. An account ID or an instance ID is not accepted by the
+token endpoint and is not used here; the secret is shown once at creation and
+cannot be retrieved later.
 """
 from __future__ import annotations
 

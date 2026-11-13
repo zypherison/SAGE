@@ -57,6 +57,17 @@ What is still untested, and cannot be tested without an account:
 - Whether its NDVI mean/histogram agrees with the ArcGIS numbers already recorded.
 - Quota, pricing and licence terms.
 
+### What credentials it needs
+
+Not an account ID. The Statistical API uses OAuth2 client credentials: a **client
+ID** (a UUID) and the **client secret** shown once when that client is created.
+Measured on 2026-11-13, the token endpoint answers
+`401 {"error":"invalid_client"}` for the supplied ID with an empty or dummy secret.
+That error is identical for a non-existent client and for a real client with the
+wrong secret, so the value's kind cannot be checked from outside. If it is an
+**instance ID** (the UUID used by WMS/WMTS configurations), this API does not use
+it at all.
+
 To finish the comparison: create an OAuth client, then
 
 ```bash
