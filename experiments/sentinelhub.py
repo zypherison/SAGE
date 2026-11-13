@@ -25,15 +25,22 @@ plus the client secret** from an OAuth client created in Dashboard -> User
 Settings -> OAuth clients. An account ID or an instance ID is not accepted by the
 token endpoint and is not used here; the secret is shown once at creation and
 cannot be retrieved later.
+
+Measured on this branch: Sentinel Hub now also accepts a **Planet JWT**, because
+Sentinel Hub runs inside the Planet Insights Platform. Set `SENTINELHUB_TOKEN` to
+that token and the OAuth exchange is skipped entirely. Planet tokens expire after
+about two hours, so they are passed per run and never stored here.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import date
 from typing import Any
 
 STATS_URL = "https://services.sentinel-hub.com/api/v1/statistics"
@@ -44,6 +51,11 @@ TOKEN_URL = (
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 HUSSAIN_SAGAR = [78.4623, 17.4086, 78.4868, 17.4374]
 
+# Resolution is in the units of CRS84, i.e. degrees, not metres: asking for
+# `resx: 10` means 10 degrees and the API rejects it (3203 m/px > 1500 limit).
+# 0.0001 deg is ~10.5 m at 17 N, close to Sentinel-2's native 10 m grid.
+RES_DEGREES = 0.0001
+
 # Only the two indices SAGE already reports, so a result is comparable.
 INDEXES = {
     "ndvi": ("B04", "B08", "(s.B08 - s.B04) / (s.B08 + s.B04 + 0.000001)"),
@@ -53,7 +65,7 @@ INDEXES = {
 _EVALSCRIPT = """//VERSION=3
 function setup() {
   return {
-    input: [{ bands: ["{b1}", "{b2}", "dataMask"] }],
+    input: [{ bands: [{bands}] }],
     output: [
       { id: "index", bands: 1, sampleType: "FLOAT32" },
       { id: "dataMask", bands: 1 }
@@ -61,21 +73,41 @@ function setup() {
   };
 }
 function evaluatePixel(s) {
-  return { index: [{formula}], dataMask: [s.dataMask] };
+{setup}  return { index: [{formula}], dataMask: [{mask}] };
 }
 """
 
+# Scene Classification Layer classes that are not usable ground: cloud shadow,
+# cloud (medium and high probability), thin cirrus and snow. Water and built-up
+# stay in, since NDVI is meaningful over them.
+_SCL_BAD = (3, 8, 9, 10, 11)
 
-def evalscript_for(index: str) -> str:
-    """Evalscript returning the index plus a dataMask, which is mandatory here."""
+
+def evalscript_for(index: str, *, cloud_mask: bool = False) -> str:
+    """Evalscript returning the index plus a dataMask, which is mandatory here.
+
+    With `cloud_mask`, the SCL band is read as well and cloud, shadow, cirrus and
+    snow pixels are dropped by zeroing their dataMask - the per-pixel masking
+    SAGE's keyless pending path cannot do.
+    """
     key = index.lower()
     if key not in INDEXES:
         raise ValueError(f"unsupported index {index!r}; choose from {sorted(INDEXES)}")
     b1, b2, formula = INDEXES[key]
+    bands = [b1, b2, "dataMask"] + (["SCL"] if cloud_mask else [])
+    if cloud_mask:
+        setup = (
+            "  var mask = s.dataMask;\n  var scl = s.SCL;\n"
+            + "".join(f"  if (scl === {c}) mask = 0;\n" for c in _SCL_BAD)
+        )
+        mask = "mask"
+    else:
+        setup, mask = "", "s.dataMask"
     return (
-        _EVALSCRIPT.replace("{b1}", b1)
-        .replace("{b2}", b2)
+        _EVALSCRIPT.replace("{bands}", ", ".join(f'"{b}"' for b in bands))
+        .replace("{setup}", setup)
         .replace("{formula}", formula)
+        .replace("{mask}", mask)
     )
 
 
@@ -88,6 +120,8 @@ def request_body(
     max_cloud: float | None = 40.0,
     geometry: dict[str, Any] | None = None,
     n_bins: int = 10,
+    cloud_mask: bool = False,
+    interval: str = "P30D",
 ) -> dict[str, Any]:
     """One P30D-aggregated request.
 
@@ -115,10 +149,10 @@ def request_body(
                 "from": f"{start}T00:00:00Z",
                 "to": f"{end}T23:59:59Z",
             },
-            "aggregationInterval": {"of": "P30D"},
-            "evalscript": evalscript_for(index),
-            "resx": 10,
-            "resy": 10,
+            "aggregationInterval": {"of": interval},
+            "evalscript": evalscript_for(index, cloud_mask=cloud_mask),
+            "resx": RES_DEGREES,
+            "resy": RES_DEGREES,
         },
         "calculations": {
             "default": {
@@ -167,6 +201,13 @@ def summarise(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def span_days(start: str, end: str) -> int:
+    """Inclusive length of the requested window in days."""
+    first = date.fromisoformat(start[:10])
+    last = date.fromisoformat(end[:10])
+    return (last - first).days + 1
+
+
 def _post_json(
     url: str, body: dict[str, Any], token: str | None = None, timeout: int = 90
 ) -> tuple[int, dict[str, Any]]:
@@ -192,6 +233,10 @@ def _post_json(
 
 
 def fetch_token(timeout: int = 30) -> str:
+    """Bearer token: a supplied Planet JWT, else OAuth2 client credentials."""
+    token = (os.environ.get("SENTINELHUB_TOKEN") or "").strip()
+    if token:
+        return token
     client_id = os.environ.get("SENTINELHUB_CLIENT_ID")
     client_secret = os.environ.get("SENTINELHUB_CLIENT_SECRET")
     if not client_id or not client_secret:
@@ -231,7 +276,26 @@ def main() -> int:
         help="GeoJSON polygon as a file path or inline JSON; clips the statistics",
     )
     parser.add_argument("--bins", type=int, default=10)
+    parser.add_argument(
+        "--interval",
+        default="P30D",
+        help="aggregation interval (P10D, P30D, ...); it must fit the window",
+    )
+    parser.add_argument(
+        "--cloud-mask",
+        action="store_true",
+        help="drop SCL cloud/shadow/cirrus/snow pixels instead of counting them",
+    )
     args = parser.parse_args()
+
+    days = span_days(args.start, args.end)
+    if args.interval == "P30D" and days < 30:
+        print(
+            f"warning: P30D needs a window of at least 30 days; {args.start}.."
+            f"{args.end} is {days}, and the API answers with no intervals at all. "
+            "Use --interval P10D or widen the range.",
+            file=sys.stderr,
+        )
 
     geometry = None
     if args.geometry:
@@ -248,13 +312,16 @@ def main() -> int:
         index=args.index,
         geometry=geometry,
         n_bins=args.bins,
+        cloud_mask=args.cloud_mask,
+        interval=args.interval,
     )
 
     if args.dry_run:
         print(json.dumps(body, indent=2))
         print(
             f"\nAOI: {'polygon' if geometry else 'bbox'}  "
-            f"index: {args.index}  bins: {args.bins}",
+            f"index: {args.index}  bins: {args.bins}  "
+            f"cloud mask: {'SCL' if args.cloud_mask else 'none'}",
             flush=True,
         )
         return 0

@@ -7,7 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from experiments.sentinelhub import evalscript_for, request_body, summarise
+from experiments.sentinelhub import (
+    evalscript_for,
+    fetch_token,
+    request_body,
+    span_days,
+    summarise,
+)
 
 BB = [78.4623, 17.4086, 78.4868, 17.4374]
 TRIANGLE = {
@@ -97,6 +103,49 @@ def test_summarise_reads_the_published_response_shape():
     assert row["percentiles"]["50.0"] == 0.1036
     assert [b["count"] for b in row["bins"]] == [0, 2458]
     assert row["overflow"] == 3
+
+
+def test_cloud_mask_reads_scl_and_zeroes_the_bad_classes():
+    script = evalscript_for("ndvi", cloud_mask=True)
+    assert '"SCL"' in script
+    for scl in (3, 8, 9, 10, 11):
+        assert f"if (scl === {scl}) mask = 0;" in script
+    assert "dataMask: [mask]" in script
+    # The unmasked script must not pay for the extra band.
+    assert "SCL" not in evalscript_for("ndvi")
+
+
+def test_request_body_passes_the_mask_through():
+    body = request_body(bbox=BB, start="2025-10-01", end="2025-11-30", cloud_mask=True)
+    assert '"SCL"' in body["aggregation"]["evalscript"]
+
+
+def test_a_supplied_token_skips_the_oauth_exchange(monkeypatch):
+    monkeypatch.setenv("SENTINELHUB_TOKEN", " planet-jwt ")
+    monkeypatch.delenv("SENTINELHUB_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SENTINELHUB_CLIENT_SECRET", raising=False)
+    assert fetch_token() == "planet-jwt"
+
+
+def test_resolution_is_in_degrees_not_metres():
+    body = request_body(bbox=BB, start="2025-10-01", end="2025-11-30")
+    # CRS84 units: 0.0001 deg is ~10.5 m here; 10 would be 10 degrees and 400.
+    assert body["aggregation"]["resx"] < 0.001
+    assert body["aggregation"]["resx"] == body["aggregation"]["resy"]
+
+
+def test_span_days_counts_both_ends():
+    # A P30D interval needs 30 days in the window; 2025-06-01..2025-06-30 is 30,
+    # while ..06-28 is only 28 and the API answers with no intervals at all.
+    assert span_days("2025-06-01", "2025-06-30") == 30
+    assert span_days("2025-06-01", "2025-06-28") == 28
+
+
+def test_interval_is_configurable():
+    body = request_body(
+        bbox=BB, start="2025-10-01", end="2025-11-30", interval="P10D"
+    )
+    assert body["aggregation"]["aggregationInterval"]["of"] == "P10D"
 
 
 def test_failed_status_is_raised_not_silently_empty():

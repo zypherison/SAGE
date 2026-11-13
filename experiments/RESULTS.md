@@ -52,35 +52,66 @@ Measured on this branch:
   "especially important when you are requesting statistics for a polygon", because it
   is what excludes pixels inside the bbox but outside the polygon.
 
-What is still untested, and cannot be tested without an account:
+### Credentials: a Planet token works
 
-- Whether its archive really reaches past ArcGIS's ~14-month window for this AOI.
-- Whether SCL-based cloud masking removes the contaminated Landsat scenes that forced
-  the plausibility filter in `thermal.py`.
-- Whether its NDVI mean/histogram agrees with the ArcGIS numbers already recorded.
-- Quota, pricing and licence terms.
+Sentinel Hub now runs inside the Planet Insights Platform, and it accepts a **Planet
+JWT** directly. Measured on 2026-11-13, `Authorization: Bearer <planet-jwt>` returns
+`200` from both `/api/v1/statistics` and `/api/v1/process`; no OAuth exchange is
+needed. The script takes it as `SENTINELHUB_TOKEN` and skips the token request.
 
-### What credentials it needs
+That also settles the earlier UUID: `5f3a0e44-…` is the **Planet project/account**
+id (the token's `pl_project` claim), not a Sentinel Hub OAuth client, which is why
+it returned `401 invalid_client`. The OAuth client-ID pair still works for accounts
+that have one, but it is no longer the only route. Planet tokens expire after about
+two hours, so they are passed per run and never stored in the repo.
 
-Not an account ID. The Statistical API uses OAuth2 client credentials: a **client
-ID** (a UUID) and the **client secret** shown once when that client is created.
-Measured on 2026-11-13, the token endpoint answers
-`401 {"error":"invalid_client"}` for the supplied ID with an empty or dummy secret.
-That error is identical for a non-existent client and for a real client with the
-wrong secret, so the value's kind cannot be checked from outside. If it is an
-**instance ID** (the UUID used by WMS/WMTS configurations), this API does not use
-it at all.
+### What the account can actually do
 
-To finish the comparison: create an OAuth client, then
+| Probe | Result |
+|---|---|
+| `POST /process`, Hussain Sagar, one day | `200 image/tiff`, 143,910 bytes — real pixels, not just statistics |
+| `POST /statistics`, 30-day windows | `200`, 70,560 samples per interval at `resx = 0.0001°` (~10.5 m) |
+| **Archive depth** | `2017-06-01..2017-07-01` returns 70,560 samples, mean NDVI 0.213 — so the archive reaches **2017**, far past the ~14-month ArcGIS window |
+| `GET /dataimport/quotas` | `403 COMMON_INSUFFICIENT_PERMISSIONS` — no BYOC on this account |
+
+October–November 2025, Hussain Sagar bbox, NDVI at 10.5 m, `P30D`:
+
+| Interval | Cloud mask | Mean | p50 | Samples | No-data | Share ≥ 0.3 |
+|---|---|---|---|---|---|---|
+| 2025-10-01..10-31 | none | −0.034 | −0.059 | 70,560 | 0 | 3.4 % |
+| 2025-10-01..10-31 | SCL | 0.000 | −0.097 | 70,560 | 66,152 | 17.2 % |
+| 2025-10-31..11-30 | none | 0.137 | 0.019 | 70,560 | 0 | 25.5 % |
+| 2025-10-31..11-30 | SCL | 0.137 | 0.019 | 70,560 | 0 | 25.5 % |
+
+Two things follow, both measured rather than assumed. **Cloud masking changes the
+answer where it matters:** October's mosaic is 94 % cloud/shadow by SCL, and dropping
+those pixels moves the mean from −0.034 to 0.000. November's mosaic was already
+clear, so masking changes nothing there — a reminder that a scene-level filter and a
+pixel-level mask agree only in clear months. And **the polygon clips**: sending the
+half-size triangle drops 35,036 of 70,560 pixels as outside the ring, giving mean
+0.109 against 0.137 for the bbox, a kept-fraction of 0.497 that matches the 0.500
+ratio SAGE's ArcGIS path reports for the same triangle.
+
+### The one trap worth knowing
+
+A `P30D` interval shorter than 30 days returns **`200` with `data: []`** — no error,
+no intervals, which reads exactly like "no imagery". Every empty window above was a
+28-day window until this was found. The script now warns when the range is too short
+for the interval, and `--interval P10D` works for shorter ranges.
+
+Still unverified: whether an NDVI figure from this service agrees numerically with
+the ArcGIS numbers already recorded, since the two use different grids and
+statistic definitions; and quota, pricing and licence terms.
 
 ```bash
-SENTINELHUB_CLIENT_ID=... SENTINELHUB_CLIENT_SECRET=... \
-  python experiments/sentinelhub.py --run --from 2025-10-01 --to 2025-11-30
+SENTINELHUB_TOKEN=<planet-jwt> \
+  python experiments/sentinelhub.py --run --from 2025-10-01 --to 2025-11-30 --cloud-mask
+SENTINELHUB_TOKEN=<planet-jwt> \
+  python experiments/sentinelhub.py --run --from 2017-06-01 --to 2017-07-01 --cloud-mask
 ```
 
-and compare the rows with the Hussain Sagar figures in the seminar document. Passing
-`--geometry <file.geojson>` sends the polygon instead of the bbox, matching the new
-polygon AOI behaviour on `main`.
+Passing `--geometry <file.geojson>` sends the polygon instead of the bbox, matching
+the polygon AOI behaviour on `main`.
 
 ## 3. Planet Data API
 
@@ -116,5 +147,5 @@ python experiments/sentinelhub.py --dry-run          # no network
 python experiments/sentinelhub.py --probe            # one request, expect 401
 PLANET_API_KEY=... python experiments/planet.py --stats   # monthly scene counts
 PLANET_API_KEY=... python experiments/planet.py --assets PSScene/<item-id>
-python -m pytest experiments -q                      # offline, 10 tests
+python -m pytest experiments -q                      # offline, 16 tests
 ```
