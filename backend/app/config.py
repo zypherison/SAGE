@@ -233,6 +233,46 @@ RANK_WEIGHTS = {
 }
 TEMPORAL_TAU_DAYS = 15.0
 
+# --------------------------------------------------------------------------
+# Geostack (optional heavy dependencies; see GEOSTACK.md)
+# --------------------------------------------------------------------------
+# The core API keeps installing with five small dependencies; geopandas, rasterio,
+# Earth Engine and geemap live behind `app/geostack` and are imported lazily.
+_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Sentinel-2 L2A DN -> reflectance.
+#
+# `raster:bands[].offset` in Earth Search items is NOT trustworthy: it advertises
+# -0.1 for every scene processed with baseline >= 04.00, whether or not the +1000
+# DN shift was actually baked into the COG. Measured here on 2026-11-13: applying
+# it to S2C_43QHV_20261113 (baseline 05.13) turned a median red reflectance of
+# 0.087 into -0.013 and pushed NDVI to a mean of 1.28 with values above 2.
+# The item-level `earthsearch:boa_offset_applied` flag is the authority
+# (github.com/Element84/earth-search/issues/71). When it is true the DN are
+# already shifted, so reflectance = DN * scale and the offset is 0.
+S2_REFLECTANCE_SCALE = 0.0001
+# Default when no flag is available: assume the shift was applied. This is the
+# conservative choice, because most of the historical archive never had it.
+S2_REFLECTANCE_OFFSET = 0.0
+# Only used when the item says the shift was NOT applied, or its baseline is
+# >= 04.00 with no flag at all.
+S2_LEGACY_OFFSET = -0.1
+# SCL classes dropped by the cloud mask: cloud shadow, medium/high-probability
+# cloud, thin cirrus, snow. Same set the Sentinel Hub script uses.
+S2_CLOUD_CLASSES = (3, 8, 9, 10, 11)
+
+WORLDPOP_URL = env(
+    "SAGE_WORLDPOP_URL",
+    "https://data.worldpop.org/GIS/Population/Global_2000_2020_1km_UNadj/"
+    "{year}/{ISO3}/{iso3}_ppp_{year}_1km_Aggregated_UNadj.tif",
+)
+# The WorldPop server advertises `Accept-Ranges: bytes` but GDAL's /vsicurl gets
+# "Range downloading not supported by this server" (measured 2026-11-13), so the
+# country raster is downloaded once and cached instead of read in place.
+WORLDPOP_CACHE_DIR = env("SAGE_WORLDPOP_CACHE", os.path.join(_BASE, "data", "cache", "worldpop"))
+MAP_DIR = env("SAGE_MAP_DIR", os.path.join(_BASE, "data", "maps"))
+GEOSTACK_MAX_PIXELS = int(env("SAGE_GEOSTACK_MAX_PIXELS", "40000000"))
+
 # Evidence store (append-only JSONL; no DB dependency for a prototype)
 EVIDENCE_PATH = env(
     "SAGE_EVIDENCE_PATH",

@@ -3,7 +3,7 @@
 Satellite imagery **area-of-interest search** with **deterministic spectral-index statistics**
 and **replayable evidence IDs**.
 
-The planning document that this implements is [`SEMINAR2.md`](SEMINAR2.md).
+The planning document that this implements is [`../SEMINAR2.md`](../SEMINAR2.md).
 
 ## What it actually does
 
@@ -36,6 +36,11 @@ The planning document that this implements is [`SEMINAR2.md`](SEMINAR2.md).
     month across up to five years, cloud-contaminated scenes rejected by physical plausibility
     and listed with the reason. Labelled as brightness temperature, never as land-surface
 temperature.
+14. Serves an optional **geostack** (`/api/geo`): geopandas/pyproj AOI metrics with a projection
+    cross-check, rasterio index statistics read straight from Sentinel-2 COGs through STAC,
+    WorldPop population inside the AOI, Earth Engine composites when credentials exist, and a
+    self-contained geemap HTML map. The heavy libraries are optional — without them the rest of
+    the API is unchanged. See [`backend/GEOSTACK.md`](backend/GEOSTACK.md).
 
 ## Requirements
 
@@ -58,6 +63,16 @@ npm run dev
 ```
 
 Open <http://localhost:5173>. API docs: <http://localhost:8000/docs>.
+
+## Optional geostack
+
+```bash
+backend/.venv/bin/pip install -r backend/requirements-geo.txt
+```
+
+Without it, `/api/geo/*` answers `503 geostack_unavailable` and everything else keeps
+working. Earth Engine additionally needs `SAGE_EE_PROJECT`, `SAGE_EE_SERVICE_ACCOUNT`
+and `SAGE_EE_KEY_FILE`; until then those endpoints report what is missing.
 
 ## Tests
 

@@ -70,6 +70,7 @@ from app.services.geo import (
     validate_bbox,
 )
 from app.services.net import Fetch
+from app.geostack.router import router as geo_router
 from app.services.query_parser import parse
 
 app = FastAPI(
@@ -89,6 +90,11 @@ app.add_middleware(
 @app.exception_handler(AppError)
 async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(status_code=exc.status, content=exc.envelope())
+
+
+# Optional heavy stack (geopandas, rasterio, Earth Engine, geemap). Importing the
+# router is cheap: the libraries are only touched inside the handlers.
+app.include_router(geo_router)
 
 
 @asynccontextmanager

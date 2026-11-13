@@ -18,6 +18,7 @@ AOI_TOO_LARGE = "aoi_too_large"
 UNKNOWN_INDEX = "unknown_index"
 NO_IMAGERY = "no_imagery"
 EVIDENCE_NOT_FOUND = "evidence_not_found"
+GEOSTACK_UNAVAILABLE = "geostack_unavailable"
 
 STATUS_BY_CODE = {
     INVALID_ARGUMENTS: 422,
@@ -29,6 +30,7 @@ STATUS_BY_CODE = {
     UNKNOWN_INDEX: 422,
     NO_IMAGERY: 422,  # a valid request that the coverage window cannot satisfy
     EVIDENCE_NOT_FOUND: 404,
+    GEOSTACK_UNAVAILABLE: 503,  # optional geospatial dependency or credential is absent
 }
 
 
