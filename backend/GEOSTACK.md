@@ -118,6 +118,35 @@ Earth Engine is **not** configured yet; `/api/geo/composite` and EE map layers s
 disabled until the three variables are set, which is the intended behaviour rather
 than a failure.
 
+## Geo Workbench (`frontend-geo/`)
+
+A second, branch-only frontend that speaks this API directly. It is not the SAGE UI
+with a new skin: the layout follows GeoLibre's working surface — full-bleed dark
+map, a floating layer card, a right-hand tool dock, and a status bar carrying
+cursor, area, valid pixels and scene — because an index raster is easier to read
+when the map is the page and the controls are on top of it.
+
+```bash
+cd frontend-geo
+npm install
+npm run dev        # http://127.0.0.1:5174, proxies /api to :8000
+```
+
+It runs on 5174 so it can sit next to the classic frontend on 5173 against one
+backend. What it can do today: draw a box or a polygon, see ellipsoid area and the
+projection cross-check, run any of the five indices over a date window with SCL
+masking, read the stats, histogram, scene and reflectance convention, view the PNG
+preview, estimate WorldPop population, and publish a geemap HTML map. Capability
+chips reflect `/api/geo/capabilities`, and error envelopes are shown by code rather
+than as "HTTP 422".
+
+Verified on 2026-11-13 through the dev proxy: `/api/geo/index` returned 200 in
+25.8 s, mean NDVI 0.1723, 83,134 valid pixels, a 121,846-byte 266×324 PNG preview,
+and the deterministic evidence id `6510d1b2d73c15ef`.
+
+Limits: one AOI at a time, no tile layer (the preview is a single PNG), and the
+Earth Engine layer appears only once credentials exist.
+
 ## Tests
 
 ```bash
