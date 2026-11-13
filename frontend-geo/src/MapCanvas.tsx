@@ -13,26 +13,30 @@ interface Props {
   onCursor: (lat: number, lng: number, zoom: number) => void;
 }
 
-/**
- * Two keyless basemaps. The dark canvas is the working surface (an index raster
- * reads best on it); imagery is there to check that the AOI is where you think
- * it is. No API key, so a clone renders immediately.
- */
+/** Keyless basemaps, chosen for analysis rather than decoration. */
 const BASEMAPS = [
   {
-    id: "dark",
-    label: "Canvas",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    id: "light",
+    label: "Light",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     maxZoom: 20,
   },
   {
-    id: "imagery",
-    label: "Imagery",
+    id: "satellite",
+    label: "Satellite",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
     maxZoom: 19,
+  },
+  {
+    id: "dark",
+    label: "Dark",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    maxZoom: 20,
   },
 ] as const;
 
@@ -40,10 +44,7 @@ const ringToLatLngs = (ring: number[][]): L.LatLngExpression[] =>
   ring.map(([lon, lat]) => [lat, lon] as [number, number]);
 
 const closeRing = (verts: L.LatLng[]): PolygonGeometry => {
-  const ring = verts.map((v) => [
-    Number(v.lng.toFixed(6)),
-    Number(v.lat.toFixed(6)),
-  ]);
+  const ring = verts.map((v) => [Number(v.lng.toFixed(6)), Number(v.lat.toFixed(6))]);
   ring.push(ring[0]);
   return { type: "Polygon", coordinates: [ring] };
 };
@@ -55,22 +56,27 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
   const tileRef = useRef<L.TileLayer | null>(null);
   const [basemap, setBasemap] = useState<string>(BASEMAPS[0].id);
 
-  // Callbacks in a ref so Leaflet handlers never need to be re-bound.
   const callbacks = useRef({ onGeometry, onFinish, onCursor });
   callbacks.current = { onGeometry, onFinish, onCursor };
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host || mapRef.current) return;
-    const map = L.map(host, { zoomControl: false, worldCopyJump: true }).setView(
-      [17.4239, 78.4738],
-      11,
-    );
+
+    const map = L.map(host, {
+      zoomControl: false,
+      worldCopyJump: true,
+      zoomSnap: 0.25,
+      attributionControl: true,
+    }).setView([17.4239, 78.4738], 11);
+
     L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.control.scale({ position: "bottomright", imperial: false, maxWidth: 120 }).addTo(map);
     map.on("mousemove", (event: L.LeafletMouseEvent) =>
       callbacks.current.onCursor(event.latlng.lat, event.latlng.lng, map.getZoom()),
     );
     mapRef.current = map;
+
     return () => {
       map.remove();
       mapRef.current = null;
@@ -87,6 +93,7 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
       attribution: config.attribution,
       maxZoom: config.maxZoom,
       subdomains: "abcd",
+      detectRetina: true,
     }).addTo(map);
   }, [basemap]);
 
@@ -114,10 +121,11 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
         start = event.latlng;
         preview?.remove();
         preview = L.rectangle(L.latLngBounds(start, start), {
-          color: "#5eead4",
+          color: "#1d4ed8",
           weight: 1.5,
-          dashArray: "4 3",
-          fillOpacity: 0.08,
+          dashArray: "5 4",
+          fillColor: "#1d4ed8",
+          fillOpacity: 0.06,
         }).addTo(map);
       };
       const onMove = (event: L.LeafletMouseEvent) => {
@@ -134,7 +142,7 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
           Math.abs(bounds.getEast() - bounds.getWest()) < 1e-4 ||
           Math.abs(bounds.getNorth() - bounds.getSouth()) < 1e-4
         ) {
-          return; // a click, not a drag
+          return;
         }
         callbacks.current.onGeometry(
           closeRing([
@@ -160,7 +168,6 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
       };
     }
 
-    // Polygon: click each corner, double-click to close.
     map.dragging.disable();
     const vertices: L.LatLng[] = [];
     let sketch: L.Polyline | null = null;
@@ -169,15 +176,17 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
       const points: L.LatLngExpression[] = vertices.map((v) => [v.lat, v.lng]);
       if (cursor && points.length) points.push([cursor.lat, cursor.lng]);
       if (!sketch) {
-        sketch = L.polyline(points, { color: "#5eead4", weight: 1.5, dashArray: "5 4" }).addTo(map);
+        sketch = L.polyline(points, {
+          color: "#1d4ed8",
+          weight: 1.5,
+          dashArray: "5 4",
+        }).addTo(map);
       } else {
         sketch.setLatLngs(points);
       }
     };
     const onClick = (event: L.LeafletMouseEvent) => {
       const last = vertices[vertices.length - 1];
-      // A double-click fires two clicks; ignore the duplicate or every polygon
-      // gains a zero-length edge and a repaired-geometry warning.
       if (last && last.distanceTo(event.latlng) < 2) return;
       vertices.push(event.latlng);
       redraw(null);
@@ -213,7 +222,6 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
     };
   }, [mode]);
 
-  // Draw the committed AOI, and frame it when it changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -224,13 +232,13 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
 
     const latlngs = ringToLatLngs(geometry.coordinates[0]);
     L.polygon(latlngs, {
-      color: "#5eead4",
+      color: "#1d4ed8",
       weight: 2,
-      fillColor: "#5eead4",
-      fillOpacity: 0.1,
+      fillColor: "#1d4ed8",
+      fillOpacity: 0.07,
     }).addTo(layer);
     if (map.getSize().x > 0) {
-      map.fitBounds(L.latLngBounds(latlngs as [number, number][]).pad(0.35), { maxZoom: 14 });
+      map.fitBounds(L.latLngBounds(latlngs as [number, number][]).pad(0.4), { maxZoom: 14 });
     }
   }, [geometry]);
 
@@ -242,6 +250,7 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
           <button
             key={entry.id}
             type="button"
+            aria-pressed={entry.id === basemap}
             className={entry.id === basemap ? "is-active" : ""}
             onClick={() => setBasemap(entry.id)}
           >

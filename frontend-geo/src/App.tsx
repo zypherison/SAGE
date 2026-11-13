@@ -15,23 +15,34 @@ import type {
   PolygonGeometry,
   PopulationResult,
 } from "./types";
+import {
+  IconChart,
+  IconCursor,
+  IconEmpty,
+  IconExternal,
+  IconLayers,
+  IconMark,
+  IconPolygon,
+  IconSquare,
+  IconTrash,
+} from "./icons";
 
 const INDEXES = [
-  { id: "ndvi", label: "NDVI", hint: "vegetation" },
-  { id: "ndwi", label: "NDWI", hint: "water" },
-  { id: "ndbi", label: "NDBI", hint: "built-up" },
-  { id: "nbr", label: "NBR", hint: "burn" },
-  { id: "ndmi", label: "NDMI", hint: "moisture" },
+  { id: "ndvi", label: "NDVI", description: "Vegetation" },
+  { id: "ndwi", label: "NDWI", description: "Surface water" },
+  { id: "ndbi", label: "NDBI", description: "Built-up" },
+  { id: "nbr", label: "NBR", description: "Burn severity" },
+  { id: "ndmi", label: "NDMI", description: "Moisture" },
 ];
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 const daysAgo = (days: number) => isoDate(new Date(Date.now() - days * 86_400_000));
-const number = (value: number | null | undefined, digits = 3) =>
+const decimal = (value: number | null | undefined, digits = 3) =>
   value === null || value === undefined || Number.isNaN(value) ? "—" : value.toFixed(digits);
-const count = (value: number | null | undefined) =>
+const integer = (value: number | null | undefined) =>
   value === null || value === undefined ? "—" : value.toLocaleString("en-IN");
 
-type Tab = "tools" | "result";
+type Tab = "tools" | "results";
 
 export default function App() {
   const [geometry, setGeometry] = useState<PolygonGeometry | null>(null);
@@ -63,10 +74,11 @@ export default function App() {
   const copyTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    getCapabilities().then(setCapabilities).catch((exc: Error) => setError(exc.message));
+    getCapabilities()
+      .then(setCapabilities)
+      .catch((exc: Error) => setError(exc.message));
   }, []);
 
-  // AOI metrics follow the drawing, so area is known before any index runs.
   useEffect(() => {
     if (!geometry) {
       setMetrics(null);
@@ -120,7 +132,7 @@ export default function App() {
 
   const analyse = () =>
     withTiming("index", async () => {
-      if (!geometry) throw new Error("draw an AOI first");
+      if (!geometry) throw new Error("Draw an area of interest first.");
       const result = await runIndex({
         geometry,
         index: indexName,
@@ -131,20 +143,20 @@ export default function App() {
         preview,
       });
       setIndex(result);
-      setTab("result");
+      setTab("results");
     });
 
   const estimatePopulation = () =>
     withTiming("population", async () => {
-      if (!geometry) throw new Error("draw an AOI first");
+      if (!geometry) throw new Error("Draw an area of interest first.");
       const result = await runPopulation(geometry, iso3.trim().toUpperCase(), Number(year));
       setPopulation(result);
-      setTab("result");
+      setTab("results");
     });
 
   const publishMap = () =>
     withTiming("map", async () => {
-      if (!geometry) throw new Error("draw an AOI first");
+      if (!geometry) throw new Error("Draw an area of interest first.");
       const result = await exportMap(geometry, "SAGE Geo Workbench AOI");
       setMapResult(result);
       window.open(result.url, "_blank", "noopener");
@@ -155,7 +167,7 @@ export default function App() {
     await navigator.clipboard.writeText(index.citation);
     setCopied(true);
     if (copyTimer.current) window.clearTimeout(copyTimer.current);
-    copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1800);
   };
 
   const histogram = useMemo(() => {
@@ -165,45 +177,59 @@ export default function App() {
   }, [index]);
 
   const ready = Boolean(geometry) && !busy;
+  const resultCount = Number(Boolean(index)) + Number(Boolean(population));
+  const selectedIndex = INDEXES.find((entry) => entry.id === indexName) ?? INDEXES[0];
 
   return (
-    <div className="workbench">
-      <header className="topbar">
+    <div className="app">
+      <header className="appbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            ◈
+          <span className="brand-mark">
+            <IconMark size={20} />
           </span>
-          <div>
+          <div className="brand-text">
             <h1>
               SAGE <span>Geo Workbench</span>
             </h1>
-            <p>branch geo/geostack · raster, vector and population lab</p>
+            <p>Raster and vector analysis · branch geo/geostack</p>
           </div>
         </div>
 
-        <div className="cap-chips" aria-label="Backend capabilities">
-          <Chip label="Vector" on={capabilities?.vector_ready} />
-          <Chip label="Raster" on={capabilities?.raster_ready} />
-          <Chip label="WorldPop" on={capabilities?.population_ready} />
-          <Chip
-            label={capabilities?.earth_engine.configured ? "Earth Engine" : "EE off"}
-            on={capabilities?.earth_engine.configured}
-            muted={!capabilities?.earth_engine.configured}
-          />
+        <div className="appbar-meta">
+          <span className={`connection ${capabilities ? "is-live" : ""}`}>
+            <i />
+            {capabilities ? "API connected" : "Connecting"}
+          </span>
+          <span className="meta-divider" />
+          <span className="meta">
+            rasterio {capabilities?.installed.rasterio ?? "—"}
+          </span>
+          <span className="meta">
+            {capabilities?.earth_engine.configured
+              ? `Earth Engine · ${capabilities.earth_engine.project ?? "project set"}`
+              : "Earth Engine not configured"}
+          </span>
         </div>
 
-        <div className="top-actions">
-          <button type="button" className="ghost" onClick={publishMap} disabled={!ready}>
+        <div className="appbar-actions">
+          <button type="button" className="btn" onClick={publishMap} disabled={!ready}>
+            <IconExternal />
             {busy === "map" ? "Publishing…" : "Publish map"}
           </button>
-          <button type="button" className="ghost" onClick={clearAll}>
-            Clear
+          <button
+            type="button"
+            className="btn btn-icon"
+            onClick={clearAll}
+            title="Clear area of interest"
+            aria-label="Clear area of interest"
+          >
+            <IconTrash />
           </button>
         </div>
       </header>
 
-      <main className="workspace">
-        <section className="map-shell">
+      <div className="stage">
+        <main className="map-pane">
           <MapCanvas
             geometry={geometry}
             mode={mode}
@@ -212,78 +238,109 @@ export default function App() {
             onCursor={(lat, lng, zoom) => setCursor({ lat, lng, zoom })}
           />
 
-          <div className="draw-toolbar" role="toolbar" aria-label="AOI tools">
+          <div className="map-tools" role="toolbar" aria-label="Draw tools">
             <button
               type="button"
               className={mode === "none" ? "is-active" : ""}
               onClick={() => setMode("none")}
               title="Pan and zoom"
+              aria-label="Pan and zoom"
             >
-              Pan
+              <IconCursor />
             </button>
+            <span className="tool-separator" />
             <button
               type="button"
               className={mode === "rect" ? "is-active" : ""}
               onClick={() => setMode("rect")}
+              title="Draw a rectangle"
             >
+              <IconSquare />
               Box
             </button>
             <button
               type="button"
               className={mode === "polygon" ? "is-active" : ""}
               onClick={() => setMode("polygon")}
+              title="Draw a polygon"
             >
+              <IconPolygon />
               Polygon
             </button>
           </div>
 
-          <aside className="layers-card">
-            <div className="layers-head">
-              <span>Layers</span>
-              <span className="badge">{geometry ? "1 AOI" : "empty"}</span>
-            </div>
-            <div className={`layer-row ${geometry ? "" : "is-empty"}`}>
-              <span className="swatch teal" />
-              <div>
-                <strong>Area of interest</strong>
-                <small>
-                  {metrics ? `${number(metrics.area_km2, 2)} km² · ${metrics.projected.crs}` : "not drawn"}
-                </small>
-              </div>
-            </div>
-            <div className={`layer-row ${index?.preview_url ? "" : "is-empty"}`}>
-              <span className="swatch lime" />
-              <div>
-                <strong>{index ? `${index.label} preview` : "Index raster"}</strong>
-                <small>
-                  {index?.scene.tile ?? "run an index"} · {index ? `${index.grid.res_m[0]} m` : "—"}
-                </small>
-              </div>
-            </div>
-            <p className="layers-note">
+          <section className="layer-panel" aria-label="Layers">
+            <header>
+              <span>
+                <IconLayers />
+                Layers
+              </span>
+              <span className="layer-count">{geometry ? 1 : 0}</span>
+            </header>
+            <ul>
+              <li className={geometry ? "" : "is-empty"}>
+                <i className="dot dot-aoi" />
+                <div>
+                  <strong>Area of interest</strong>
+                  <span>
+                    {metrics
+                      ? `${decimal(metrics.area_km2, 2)} km² · ${metrics.projected.crs}`
+                      : "Not drawn"}
+                  </span>
+                </div>
+              </li>
+              <li className={index?.preview_url ? "" : "is-empty"}>
+                <i className="dot dot-index" />
+                <div>
+                  <strong>{index ? `${index.label} preview` : "Index raster"}</strong>
+                  <span>
+                    {index
+                      ? `${index.grid.width} × ${index.grid.height} px · ${index.grid.res_m[0]} m`
+                      : "Run an index to populate"}
+                  </span>
+                </div>
+              </li>
+            </ul>
+            <p className="layer-hint">
               {mode === "polygon"
-                ? "Click each corner, double-click to close. Esc cancels."
+                ? "Click each corner, then double-click to close. Esc cancels."
                 : mode === "rect"
-                  ? "Drag a rectangle on the map."
-                  : "Draw an AOI to enable the tools."}
+                  ? "Drag a rectangle over the area to analyse."
+                  : geometry
+                    ? "Draw again to replace the current area."
+                    : "Select Box or Polygon to begin."}
             </p>
-          </aside>
-        </section>
+          </section>
+        </main>
 
-        <aside className="dock">
-          <nav className="dock-tabs">
-            <button type="button" className={tab === "tools" ? "is-active" : ""} onClick={() => setTab("tools")}>
-              Tools
-            </button>
-            <button type="button" className={tab === "result" ? "is-active" : ""} onClick={() => setTab("result")}>
-              Output
-              {(index || population) && <span className="dot" />}
-            </button>
-          </nav>
+        <aside className="panel">
+          <div className="panel-head">
+            <div className="tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "tools"}
+                className={tab === "tools" ? "is-active" : ""}
+                onClick={() => setTab("tools")}
+              >
+                Analysis
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "results"}
+                className={tab === "results" ? "is-active" : ""}
+                onClick={() => setTab("results")}
+              >
+                Results
+                {resultCount > 0 && <span className="tab-count">{resultCount}</span>}
+              </button>
+            </div>
+          </div>
 
-          <div className="dock-body">
+          <div className="panel-body">
             {error && (
-              <div className="error-banner" role="alert">
+              <div className="alert" role="alert">
                 <span>{error}</span>
                 <button type="button" onClick={() => setError(null)} aria-label="Dismiss">
                   ×
@@ -293,183 +350,239 @@ export default function App() {
 
             {tab === "tools" ? (
               <>
-                <section className="card">
-                  <header>
+                <section className="section">
+                  <div className="section-head">
                     <h2>Spectral index</h2>
-                    <span className="muted">single scene · COG window</span>
-                  </header>
+                    <p>Sentinel-2 L2A · single scene · COG window read in place</p>
+                  </div>
 
-                  <div className="index-picker">
+                  <div className="segmented" role="group" aria-label="Index">
                     {INDEXES.map((entry) => (
                       <button
                         key={entry.id}
                         type="button"
                         className={entry.id === indexName ? "is-active" : ""}
                         onClick={() => setIndexName(entry.id)}
+                        title={entry.description}
                       >
-                        <strong>{entry.label}</strong>
-                        <small>{entry.hint}</small>
+                        {entry.label}
                       </button>
                     ))}
                   </div>
+                  <p className="field-note">
+                    {selectedIndex.label} — {selectedIndex.description}
+                  </p>
 
                   <div className="field-row">
-                    <label>
-                      From
-                      <input type="date" value={dateFrom} max={dateTo} onChange={(e) => setDateFrom(e.target.value)} />
+                    <label className="field">
+                      <span>Start date</span>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        max={dateTo}
+                        onChange={(event) => setDateFrom(event.target.value)}
+                      />
                     </label>
-                    <label>
-                      To
-                      <input type="date" value={dateTo} min={dateFrom} onChange={(e) => setDateTo(e.target.value)} />
+                    <label className="field">
+                      <span>End date</span>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom}
+                        onChange={(event) => setDateTo(event.target.value)}
+                      />
                     </label>
                   </div>
 
-                  <label className="slider">
-                    <span>
-                      Max scene cloud <strong>{maxCloud}%</strong>
-                    </span>
+                  <div className="field">
+                    <div className="field-label">
+                      <span>Maximum scene cloud cover</span>
+                      <strong>{maxCloud}%</strong>
+                    </div>
                     <input
+                      className="range"
                       type="range"
                       min={0}
                       max={60}
                       step={5}
                       value={maxCloud}
-                      onChange={(e) => setMaxCloud(Number(e.target.value))}
+                      onChange={(event) => setMaxCloud(Number(event.target.value))}
                     />
-                  </label>
+                  </div>
 
-                  <div className="toggles">
+                  <div className="checks">
                     <label>
-                      <input type="checkbox" checked={cloudMask} onChange={(e) => setCloudMask(e.target.checked)} />
-                      SCL cloud mask
+                      <input
+                        type="checkbox"
+                        checked={cloudMask}
+                        onChange={(event) => setCloudMask(event.target.checked)}
+                      />
+                      Apply SCL cloud mask
                     </label>
                     <label>
-                      <input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} />
-                      PNG preview
+                      <input
+                        type="checkbox"
+                        checked={preview}
+                        onChange={(event) => setPreview(event.target.checked)}
+                      />
+                      Generate preview image
                     </label>
                   </div>
 
-                  <button type="button" className="primary" onClick={analyse} disabled={!ready}>
-                    {busy === "index" ? "Reading COG window…" : geometry ? `Run ${indexName.toUpperCase()}` : "Draw an AOI first"}
+                  <button type="button" className="btn btn-primary btn-block" onClick={analyse} disabled={!ready}>
+                    {busy === "index"
+                      ? "Reading scene…"
+                      : geometry
+                        ? `Run ${selectedIndex.label}`
+                        : "Draw an area to analyse"}
                   </button>
                 </section>
 
-                <section className="card">
-                  <header>
-                    <h2>Population</h2>
-                    <span className="muted">WorldPop 1 km, cached</span>
-                  </header>
-                  <div className="field-row compact">
-                    <label>
-                      Country
+                <hr className="divider" />
+
+                <section className="section">
+                  <div className="section-head">
+                    <h2>Population estimate</h2>
+                    <p>WorldPop 1 km UN-adjusted, cached locally</p>
+                  </div>
+                  <div className="field-row">
+                    <label className="field">
+                      <span>Country (ISO3)</span>
                       <input
                         value={iso3}
                         maxLength={3}
-                        onChange={(e) => setIso3(e.target.value.toUpperCase())}
+                        onChange={(event) => setIso3(event.target.value.toUpperCase())}
                         placeholder="IND"
+                        spellCheck={false}
                       />
                     </label>
-                    <label>
-                      Year
+                    <label className="field">
+                      <span>Year</span>
                       <input
                         type="number"
                         min={2000}
                         max={2020}
                         value={year}
-                        onChange={(e) => setYear(Number(e.target.value))}
+                        onChange={(event) => setYear(Number(event.target.value))}
                       />
                     </label>
                   </div>
-                  <button type="button" className="secondary" onClick={estimatePopulation} disabled={!ready}>
+                  <button
+                    type="button"
+                    className="btn btn-block"
+                    onClick={estimatePopulation}
+                    disabled={!ready}
+                  >
                     {busy === "population" ? "Summing raster…" : "Estimate population"}
                   </button>
                 </section>
 
-                <section className="card subtle">
-                  <header>
-                    <h2>AOI</h2>
-                    <span className="muted">geodesic + UTM check</span>
-                  </header>
+                <hr className="divider" />
+
+                <section className="section">
+                  <div className="section-head">
+                    <h2>Area of interest</h2>
+                    <p>Geodesic measurement with a projected cross-check</p>
+                  </div>
                   {metrics ? (
-                    <dl className="metric-grid">
-                      <div>
-                        <dt>Area</dt>
-                        <dd>{number(metrics.area_km2, 3)} km²</dd>
-                      </div>
-                      <div>
-                        <dt>Perimeter</dt>
-                        <dd>{number(metrics.perimeter_km, 2)} km</dd>
-                      </div>
-                      <div>
-                        <dt>Projection Δ</dt>
-                        <dd>
-                          {(number(metrics.projected.relative_area_difference ? metrics.projected.relative_area_difference * 100 : null, 3))}%
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Compactness</dt>
-                        <dd>{number(metrics.compactness, 3)}</dd>
-                      </div>
-                    </dl>
+                    <table className="data-table">
+                      <tbody>
+                        <tr>
+                          <th>Area</th>
+                          <td>{decimal(metrics.area_km2, 3)} km²</td>
+                        </tr>
+                        <tr>
+                          <th>Perimeter</th>
+                          <td>{decimal(metrics.perimeter_km, 2)} km</td>
+                        </tr>
+                        <tr>
+                          <th>Centroid</th>
+                          <td>
+                            {metrics.centroid[1].toFixed(4)}, {metrics.centroid[0].toFixed(4)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Projected area</th>
+                          <td>
+                            {decimal(metrics.projected.area_km2, 3)} km²
+                            <span className="muted">
+                              {" "}
+                              · Δ
+                              {metrics.projected.relative_area_difference === null
+                                ? "—"
+                                : (metrics.projected.relative_area_difference * 100).toFixed(3)}
+                              %
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Vertices</th>
+                          <td>{metrics.vertices}</td>
+                        </tr>
+                        <tr>
+                          <th>Geometry</th>
+                          <td>
+                            {metrics.audit.repaired ? "Repaired on load" : "Valid on load"}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   ) : (
-                    <p className="empty">No AOI yet. Draw a box or polygon on the map.</p>
+                    <p className="empty-note">
+                      No area drawn. Use Box or Polygon on the map; measurements update as soon as
+                      the shape is closed.
+                    </p>
                   )}
                 </section>
               </>
             ) : (
-              <OutputPane
+              <ResultsPane
                 index={index}
                 population={population}
                 mapResult={mapResult}
                 histogram={histogram}
                 copied={copied}
                 onCopy={copyCitation}
+                onOpenTools={() => setTab("tools")}
               />
             )}
           </div>
 
-          <footer className="dock-foot">
-            <span>{busy ? `${busy} running…` : "ready"}</span>
-            <span>{elapsed !== null ? `${elapsed.toFixed(1)} s last run` : "no runs yet"}</span>
-          </footer>
+          <div className="panel-foot">
+            <span>{busy ? `${busy} in progress` : "Ready"}</span>
+            <span>{elapsed === null ? "No runs yet" : `${elapsed.toFixed(1)} s last run`}</span>
+          </div>
         </aside>
-      </main>
+      </div>
 
       <footer className="statusbar">
-        <span className="coords">
+        <span className="coordinates">
           {cursor.lat.toFixed(4)}, {cursor.lng.toFixed(4)}
         </span>
-        <span>z{cursor.zoom}</span>
-        <span>{metrics ? `${number(metrics.area_km2, 2)} km²` : "no AOI"}</span>
+        <span>Zoom {cursor.zoom}</span>
+        <span className="status-divider" />
+        <span>{metrics ? `${decimal(metrics.area_km2, 2)} km² selected` : "No selection"}</span>
+        <span className="status-divider" />
         <span>
-          {index ? `${count(index.pixels.valid)} px valid · ${index.scene.tile ?? index.scene.id}` : "no scene"}
+          {index
+            ? `${integer(index.pixels.valid)} valid pixels · ${index.scene.tile ?? index.scene.id}`
+            : "No scene loaded"}
         </span>
         <span className="grow" />
-        <span className="dotline">
-          <i className={capabilities ? "ok" : ""} />
-          {capabilities ? "backend online" : "connecting"}
-        </span>
+        <span className="status-end">SAGE v2 · geostack</span>
       </footer>
     </div>
   );
 }
 
-function Chip({ label, on, muted }: { label: string; on?: boolean | null; muted?: boolean }) {
-  return (
-    <span className={`chip ${on ? "on" : ""} ${muted ? "muted" : ""}`}>
-      <i />
-      {label}
-    </span>
-  );
-}
-
-function OutputPane({
+function ResultsPane({
   index,
   population,
   mapResult,
   histogram,
   copied,
   onCopy,
+  onOpenTools,
 }: {
   index: IndexResult | null;
   population: PopulationResult | null;
@@ -477,13 +590,23 @@ function OutputPane({
   histogram: { low: number; high: number; count: number; share: number }[];
   copied: boolean;
   onCopy: () => void;
+  onOpenTools: () => void;
 }) {
   if (!index && !population) {
     return (
       <div className="empty-state">
-        <span className="empty-mark">◌</span>
-        <h3>Nothing measured yet</h3>
-        <p>Draw an AOI, then run an index. Every result records its scene, grid and reflectance convention.</p>
+        <span className="empty-icon">
+          <IconEmpty />
+        </span>
+        <h3>No results yet</h3>
+        <p>
+          Draw an area on the map, then run a spectral index. Each result records the scene, the
+          grid and the reflectance convention it used.
+        </p>
+        <button type="button" className="btn" onClick={onOpenTools}>
+          <IconChart />
+          Go to analysis
+        </button>
       </div>
     );
   }
@@ -491,92 +614,141 @@ function OutputPane({
   return (
     <>
       {index && index.stats && (
-        <section className="card result-card">
-          <header>
-            <h2>
-              {index.label} <span className="muted">mean</span>
-            </h2>
-            <span className="badge">{index.scene.datetime?.slice(0, 10)}</span>
+        <section className="result">
+          <header className="result-head">
+            <div>
+              <h2>{index.label}</h2>
+              <p>
+                {index.scene.collection ?? "sentinel-2-l2a"} · {index.scene.datetime?.slice(0, 10)}
+              </p>
+            </div>
+            <span className="pill">
+              {index.scene.cloud_cover === null
+                ? "cloud n/a"
+                : `${index.scene.cloud_cover.toFixed(1)}% cloud`}
+            </span>
           </header>
 
-          <div className="headline">
-            <strong>{number(index.stats.mean, 3)}</strong>
-            <span>
-              median {number(index.stats.median, 3)} · p10 {number(index.stats.p10, 3)} · p90{" "}
-              {number(index.stats.p90, 3)}
-            </span>
+          <div className="headline-stat">
+            <div className="headline-value">
+              <strong>{decimal(index.stats.mean, 3)}</strong>
+              <span>mean {index.label}</span>
+            </div>
+            <dl className="headline-grid">
+              <div>
+                <dt>Median</dt>
+                <dd>{decimal(index.stats.median, 3)}</dd>
+              </div>
+              <div>
+                <dt>p10</dt>
+                <dd>{decimal(index.stats.p10, 3)}</dd>
+              </div>
+              <div>
+                <dt>p90</dt>
+                <dd>{decimal(index.stats.p90, 3)}</dd>
+              </div>
+            </dl>
           </div>
 
-          <div className="histogram" aria-label="Index histogram">
-            {histogram.map((bin) => (
-              <span
-                key={bin.low}
-                style={{ height: `${Math.max(2, bin.share * 100)}%` }}
-                title={`${bin.low.toFixed(2)}…${bin.high.toFixed(2)}: ${bin.count.toLocaleString()}`}
-              />
-            ))}
-          </div>
-          <div className="histogram-axis">
-            <span>−1</span>
-            <span>0</span>
-            <span>+1</span>
-          </div>
+          <figure className="chart">
+            <div className="chart-bars" role="img" aria-label={`${index.label} distribution`}>
+              {histogram.map((bin) => (
+                <span
+                  key={bin.low}
+                  style={{ height: `${Math.max(3, bin.share * 100)}%` }}
+                  title={`${bin.low.toFixed(2)} to ${bin.high.toFixed(2)}: ${bin.count.toLocaleString()} pixels`}
+                />
+              ))}
+            </div>
+            <div className="chart-axis">
+              <span>−1</span>
+              <span>0</span>
+              <span>+1</span>
+            </div>
+            <figcaption>Pixel distribution across the area of interest</figcaption>
+          </figure>
 
-          <dl className="metric-grid">
-            <div>
-              <dt>Valid pixels</dt>
-              <dd>{count(index.pixels.valid)}</dd>
-            </div>
-            <div>
-              <dt>Cloud-masked</dt>
-              <dd>{count(index.pixels.cloud_masked)}</dd>
-            </div>
-            <div>
-              <dt>Std</dt>
-              <dd>{number(index.stats.std, 3)}</dd>
-            </div>
-            <div>
-              <dt>Read</dt>
-              <dd>{index.read_seconds.toFixed(1)} s</dd>
-            </div>
-          </dl>
+          <table className="data-table">
+            <tbody>
+              <tr>
+                <th>Valid pixels</th>
+                <td>{integer(index.pixels.valid)}</td>
+              </tr>
+              <tr>
+                <th>Cloud-masked</th>
+                <td>{integer(index.pixels.cloud_masked)}</td>
+              </tr>
+              <tr>
+                <th>Standard deviation</th>
+                <td>{decimal(index.stats.std, 3)}</td>
+              </tr>
+              <tr>
+                <th>Range</th>
+                <td>
+                  {decimal(index.stats.min, 3)} to {decimal(index.stats.max, 3)}
+                </td>
+              </tr>
+              <tr>
+                <th>Grid</th>
+                <td>
+                  {index.grid.width} × {index.grid.height} px · {index.grid.res_m[0]} m ·{" "}
+                  {index.grid.crs}
+                </td>
+              </tr>
+              <tr>
+                <th>Read time</th>
+                <td>{index.read_seconds.toFixed(1)} s</td>
+              </tr>
+            </tbody>
+          </table>
 
           {index.preview_url && (
             <figure className="preview">
-              <img src={index.preview_url} alt={`${index.label} preview over the AOI`} loading="lazy" />
-              <figcaption>
-                {index.grid.width}×{index.grid.height} px at {index.grid.res_m[0]} m · {index.grid.crs}
-              </figcaption>
+              <img src={index.preview_url} alt={`${index.label} preview over the area of interest`} />
+              <figcaption>{index.label} across the selected window</figcaption>
             </figure>
           )}
 
           <div className="provenance">
-            <p>
-              <span>Scene</span> {index.scene.id}
-            </p>
-            <p>
-              <span>Reflectance</span> DN × {index.reflectance.scale}
-              {index.reflectance.offset === 0 ? " (offset already applied)" : ` ${index.reflectance.offset}`} ·{" "}
-              {index.reflectance.source}
-            </p>
-            <p>
-              <span>Mask</span>{" "}
-              {index.cloud_mask.applied
-                ? `SCL classes ${index.cloud_mask.classes.join(", ")} dropped`
-                : "none"}
-            </p>
-            <p>
-              <span>Evidence</span> <code>{index.evidence_id ?? "not stored"}</code>
-            </p>
+            <h3>Provenance</h3>
+            <dl>
+              <div>
+                <dt>Scene</dt>
+                <dd>{index.scene.id}</dd>
+              </div>
+              <div>
+                <dt>Reflectance</dt>
+                <dd>
+                  DN × {index.reflectance.scale}
+                  {index.reflectance.offset === 0 ? " (offset pre-applied)" : ` + ${index.reflectance.offset}`}
+                  <span className="muted"> · {index.reflectance.source}</span>
+                </dd>
+              </div>
+              <div>
+                <dt>Cloud mask</dt>
+                <dd>
+                  {index.cloud_mask.applied
+                    ? `SCL classes ${index.cloud_mask.classes.join(", ")} removed`
+                    : "Not applied"}
+                </dd>
+              </div>
+              <div>
+                <dt>Evidence ID</dt>
+                <dd>
+                  <code>{index.evidence_id ?? "not stored"}</code>
+                </dd>
+              </div>
+            </dl>
           </div>
 
           <div className="result-actions">
-            <button type="button" className="ghost" onClick={onCopy}>
+            <button type="button" className="btn" onClick={onCopy}>
               {copied ? "Citation copied" : "Copy citation"}
             </button>
             {index.scene.source_url && (
-              <a className="ghost" href={index.scene.source_url} target="_blank" rel="noreferrer">
-                STAC item ↗
+              <a className="btn" href={index.scene.source_url} target="_blank" rel="noreferrer">
+                <IconExternal />
+                STAC item
               </a>
             )}
           </div>
@@ -584,22 +756,38 @@ function OutputPane({
       )}
 
       {population && (
-        <section className="card result-card">
-          <header>
-            <h2>
-              Population <span className="muted">{population.source.year}</span>
-            </h2>
-            <span className="badge">{population.status.replace(/_/g, " ")}</span>
+        <section className="result">
+          <header className="result-head">
+            <div>
+              <h2>Population</h2>
+              <p>
+                WorldPop 1 km · {population.source.year} · {population.source.iso3}
+              </p>
+            </div>
+            <span className="pill">{populatedLabel(population)}</span>
           </header>
-          <div className="headline">
-            <strong>{count(population.population)}</strong>
-            <span>
-              {number(population.density_per_km2, 0)} /km² over {number(population.area_km2, 2)} km²
-            </span>
+
+          <div className="headline-stat">
+            <div className="headline-value">
+              <strong>{integer(population.population)}</strong>
+              <span>estimated residents</span>
+            </div>
+            <dl className="headline-grid">
+              <div>
+                <dt>Density</dt>
+                <dd>{decimal(population.density_per_km2, 0)}/km²</dd>
+              </div>
+              <div>
+                <dt>Area</dt>
+                <dd>{decimal(population.area_km2, 2)} km²</dd>
+              </div>
+              <div>
+                <dt>Cells</dt>
+                <dd>{population.pixels_used}</dd>
+              </div>
+            </dl>
           </div>
-          <p className="small">
-            {population.pixels_used} of the 1 km cells intersecting the AOI carry data · {population.source.dataset}
-          </p>
+
           {population.notes.length > 0 && (
             <ul className="notes">
               {population.notes.map((note) => (
@@ -611,18 +799,27 @@ function OutputPane({
       )}
 
       {mapResult && (
-        <section className="card result-card">
-          <header>
-            <h2>Exported map</h2>
-            <span className="badge">{Math.round(mapResult.bytes / 1024)} KB</span>
+        <section className="result">
+          <header className="result-head">
+            <div>
+              <h2>Exported map</h2>
+              <p>{mapResult.layers.join(" · ")}</p>
+            </div>
+            <span className="pill">{Math.round(mapResult.bytes / 1024)} KB</span>
           </header>
-          <p className="small">{mapResult.layers.join(" · ")}</p>
-          {mapResult.note && <p className="small muted">{mapResult.note}</p>}
-          <a className="ghost block" href={mapResult.url} target="_blank" rel="noreferrer">
-            Open interactive map ↗
+          {mapResult.note && <p className="empty-note">{mapResult.note}</p>}
+          <a className="btn btn-block" href={mapResult.url} target="_blank" rel="noreferrer">
+            <IconExternal />
+            Open interactive map
           </a>
         </section>
       )}
     </>
   );
+}
+
+function populatedLabel(result: PopulationResult) {
+  if (result.status === "no_population_pixels") return "no populated cells";
+  if (result.status !== "ok") return result.status.replace(/_/g, " ");
+  return "modelled estimate";
 }
