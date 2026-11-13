@@ -8,3 +8,8 @@ dist/
 *.tsbuildinfo
 .env
 backend/data/evidence.jsonl
+
+# generated at runtime by the geostack (cached rasters, HTML maps, previews)
+backend/data/cache/
+backend/data/maps/
+backend/data/evidence.jsonl
