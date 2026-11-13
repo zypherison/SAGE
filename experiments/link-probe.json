@@ -1,0 +1,222 @@
+[
+  {
+    "n": 1,
+    "listed_as": "link.springer.com/subjects/geographical-information-system",
+    "url": "https://link.springer.com/subjects/geographical-information-system",
+    "status": 200,
+    "final_url": "https://link.springer.com/subjects/geographical-information-system?error=cookies_not_supported&code=d095907d-5edc-4372-8fd2-2efbf5003155",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 2.56,
+    "verdict": "reachable"
+  },
+  {
+    "n": 2,
+    "listed_as": "link.springer.com/search?query=gis&...",
+    "url": "https://link.springer.com/search?query=gis&...",
+    "status": 200,
+    "final_url": "https://link.springer.com/search?query=gis&...&error=cookies_not_supported&code=03f09efe-c44d-4f8a-a752-c94ffb7e7cd7",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 3.09,
+    "verdict": "reachable"
+  },
+  {
+    "n": 3,
+    "listed_as": "10.1007/s44163-025-00811-x",
+    "url": "https://doi.org/10.1007/s44163-025-00811-x",
+    "status": 200,
+    "final_url": "https://link.springer.com/article/10.1007/s44163-025-00811-x?error=cookies_not_supported&code=be0a52f4-2906-47d2-9cfa-848606c27d27",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 3.81,
+    "verdict": "reachable"
+  },
+  {
+    "n": 4,
+    "listed_as": "10.1007/s13369-026-11742-9",
+    "url": "https://doi.org/10.1007/s13369-026-11742-9",
+    "status": 200,
+    "final_url": "https://link.springer.com/article/10.1007/s13369-026-11742-9?error=cookies_not_supported&code=446d0258-180b-40ae-962e-b798348851c8",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 2.99,
+    "verdict": "reachable"
+  },
+  {
+    "n": 5,
+    "listed_as": "10.1007/s00477-026-03391-z",
+    "url": "https://doi.org/10.1007/s00477-026-03391-z",
+    "status": 200,
+    "final_url": "https://link.springer.com/article/10.1007/s00477-026-03391-z?error=cookies_not_supported&code=2b9cee9d-2104-4bf7-a5a4-5c8f54e2f5e0",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 2.99,
+    "verdict": "reachable"
+  },
+  {
+    "n": 6,
+    "listed_as": "sciencedirect.com/.../S3050740526000139",
+    "url": "https://sciencedirect.com/.../S3050740526000139",
+    "status": 403,
+    "final_url": "https://www.sciencedirect.com/.../S3050740526000139",
+    "content_type": "text/html; charset=UTF-8",
+    "bytes_read": 0,
+    "seconds": 0.53,
+    "verdict": "blocked to scripts"
+  },
+  {
+    "n": 8,
+    "listed_as": "academic.oup.com/nsr/article/8/9/nwab027",
+    "url": "https://academic.oup.com/nsr/article/8/9/nwab027",
+    "status": 403,
+    "final_url": "https://academic.oup.com/nsr/article/8/9/nwab027",
+    "content_type": "text/html; charset=UTF-8",
+    "bytes_read": 0,
+    "seconds": 0.09,
+    "verdict": "blocked to scripts"
+  },
+  {
+    "n": 9,
+    "listed_as": "earthdata.nasa.gov/.../access/eos-data-cloud",
+    "url": "https://earthdata.nasa.gov/.../access/eos-data-cloud",
+    "status": 403,
+    "final_url": "https://earthdata.nasa.gov/.../access/eos-data-cloud",
+    "content_type": "text/html",
+    "bytes_read": 0,
+    "seconds": 0.43,
+    "verdict": "blocked to scripts"
+  },
+  {
+    "n": 10,
+    "listed_as": "earthdata.nasa.gov/",
+    "url": "https://earthdata.nasa.gov/",
+    "status": 200,
+    "final_url": "https://www.earthdata.nasa.gov/",
+    "content_type": "text/html; charset=UTF-8",
+    "bytes_read": 2048,
+    "seconds": 1.28,
+    "verdict": "reachable"
+  },
+  {
+    "n": 11,
+    "listed_as": "earthsystemdatalab.net/#services",
+    "url": "https://earthsystemdatalab.net/#services",
+    "status": 200,
+    "final_url": "https://earthsystemdatalab.net/#services",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 0.59,
+    "verdict": "reachable"
+  },
+  {
+    "n": 12,
+    "listed_as": "earthsystemdatalab.net/earthcode/",
+    "url": "https://earthsystemdatalab.net/earthcode/",
+    "status": 200,
+    "final_url": "https://earthsystemdatalab.net/earthcode/",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 0.37,
+    "verdict": "reachable"
+  },
+  {
+    "n": 13,
+    "listed_as": "earthsystemdatalab.net/guide/visualisation/xcube-viewer/",
+    "url": "https://earthsystemdatalab.net/guide/visualisation/xcube-viewer/",
+    "status": 200,
+    "final_url": "https://earthsystemdatalab.net/guide/visualisation/xcube-viewer/",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 0.43,
+    "verdict": "reachable"
+  },
+  {
+    "n": 14,
+    "listed_as": "earthsystemdatalab.net/data/",
+    "url": "https://earthsystemdatalab.net/data/",
+    "status": 200,
+    "final_url": "https://earthsystemdatalab.net/data/",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 0.43,
+    "verdict": "reachable"
+  },
+  {
+    "n": 15,
+    "listed_as": "sentinel-hub.com/develop/api/",
+    "url": "https://sentinel-hub.com/develop/api/",
+    "status": 200,
+    "final_url": "https://www.sentinel-hub.com/develop/api/",
+    "content_type": "text/html",
+    "bytes_read": 2048,
+    "seconds": 0.88,
+    "verdict": "reachable"
+  },
+  {
+    "n": 16,
+    "listed_as": "github.com/mohammadhashemii/awesome-agentic-AI-for-Geospatial-Data",
+    "url": "https://github.com/mohammadhashemii/awesome-agentic-AI-for-Geospatial-Data",
+    "status": 200,
+    "final_url": "https://github.com/mohammadhashemii/awesome-agentic-AI-for-Geospatial-Data",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 0.82,
+    "verdict": "reachable"
+  },
+  {
+    "n": 17,
+    "listed_as": "tandfonline.com/doi/full/10.1080/17538947.2026.2633849",
+    "url": "https://tandfonline.com/doi/full/10.1080/17538947.2026.2633849",
+    "status": 403,
+    "final_url": "https://tandfonline.com/doi/full/10.1080/17538947.2026.2633849",
+    "content_type": "text/html; charset=UTF-8",
+    "bytes_read": 0,
+    "seconds": 0.11,
+    "verdict": "blocked to scripts"
+  },
+  {
+    "n": 19,
+    "listed_as": "skywatch.com",
+    "url": "https://skywatch.com",
+    "status": 200,
+    "final_url": "https://skywatch.com",
+    "content_type": "text/html; charset=UTF-8",
+    "bytes_read": 2048,
+    "seconds": 1.34,
+    "verdict": "reachable"
+  },
+  {
+    "n": 20,
+    "listed_as": "bhuvan-app3.nrsc.gov.in/data/download/...",
+    "url": "https://bhuvan-app3.nrsc.gov.in/data/download/...",
+    "status": 404,
+    "final_url": "https://bhuvan-app3.nrsc.gov.in/data/download/...",
+    "content_type": "text/html; charset=iso-8859-1",
+    "bytes_read": 0,
+    "seconds": 4.02,
+    "verdict": "not found"
+  },
+  {
+    "n": 21,
+    "listed_as": "bhuvan-app1.nrsc.gov.in/2dresources/bhuvanstore.php",
+    "url": "https://bhuvan-app1.nrsc.gov.in/2dresources/bhuvanstore.php",
+    "status": 200,
+    "final_url": "https://bhuvan-app1.nrsc.gov.in/2dresources/bhuvanstore.php",
+    "content_type": "text/html; charset=UTF-8",
+    "bytes_read": 2048,
+    "seconds": 3.88,
+    "verdict": "reachable"
+  },
+  {
+    "n": 22,
+    "listed_as": "link.springer.com/search?...content-type=...",
+    "url": "https://link.springer.com/search?...content-type=...",
+    "status": 200,
+    "final_url": "https://link.springer.com/search?...content-type=...&error=cookies_not_supported&code=afd8a4a3-fff1-4d4b-bf66-c84ca5ad5908",
+    "content_type": "text/html; charset=utf-8",
+    "bytes_read": 2048,
+    "seconds": 2.42,
+    "verdict": "reachable"
+  }
+]
