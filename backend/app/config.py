@@ -91,6 +91,97 @@ TIMESERIES_MAX_POINTS = int(env("SAGE_TIMESERIES_MAX_POINTS", "10"))
 COMPARE_WINDOW_DAYS = int(env("SAGE_COMPARE_WINDOW_DAYS", "7"))
 
 # --------------------------------------------------------------------------
+# Class areas: turning an index histogram into km²
+# --------------------------------------------------------------------------
+# `computeStatisticsHistograms` returns 256 bins spanning the OBSERVED min/max of
+# the index over the AOI (probed 2026-11-13: 256 bins, min -0.267, max 0.516 for
+# NDVI over Hyderabad). A threshold on those bins gives a pixel share, and share
+# × AOI area gives km². These thresholds are definitions, not measurements, so
+# each one carries the reason it was chosen and is echoed in the response.
+HISTOGRAM_BINS = 256
+
+AREA_CLASSES: dict[str, list[dict[str, object]]] = {
+    "ndvi": [
+        {
+            "name": "vegetation",
+            "label": "Vegetation",
+            "threshold": 0.30,
+            "above": True,
+            "basis": "NDVI > 0.30 is the usual cut-off for green cover; dense canopy "
+                     "saturates above ~0.8, so this is a presence test, not a health score.",
+        }
+    ],
+    "ndwi": [
+        {
+            "name": "water",
+            "label": "Open water",
+            "threshold": 0.0,
+            "above": True,
+            "basis": "NDWI > 0 follows the McFeeters convention; shallow or turbid water "
+                     "can fall below it, so this under-counts rather than over-counts.",
+        }
+    ],
+    "ndbi": [
+        {
+            "name": "built_up",
+            "label": "Built-up",
+            "threshold": 0.0,
+            "above": True,
+            "basis": "NDBI > 0 leans built-up, but bare soil and rock also land here; "
+                     "read it as an indicator, not a cadastral boundary.",
+        }
+    ],
+    "nbr": [
+        {
+            "name": "low_nbr",
+            "label": "Low NBR",
+            "threshold": 0.10,
+            "above": False,
+            "basis": "NBR < 0.10 is the burn-scar side of the dNBR scale; it also catches "
+                     "water and bare ground, so pair it with a before-date.",
+        }
+    ],
+}
+
+# --------------------------------------------------------------------------
+# Same-month comparison across years
+# --------------------------------------------------------------------------
+# A pixel-wise median composite is NOT available: the service rejects
+# `mosaicMethod: median` by silently ignoring it (verified 2026-11-13 — it returns
+# the same value as the nonsense method "banana", while esriMosaicNadir differs,
+# so the rule is read but "median" is not a valid method). What is available is
+# the median across ACQUISITIONS of the AOI statistic, which is what this does.
+SEASONAL_MAX_SCENES = int(env("SAGE_SEASONAL_MAX_SCENES", "6"))  # per month, per year
+SEASONAL_MAX_YEARS = int(env("SAGE_SEASONAL_MAX_YEARS", "3"))
+
+# --------------------------------------------------------------------------
+# Thermal: Landsat 8/9 brightness temperature
+# --------------------------------------------------------------------------
+# Reachable without a key and archived back to 2020, unlike the Sentinel-2
+# service's ~14-month window. Probed 2026-11-13: 11 bands, thermal at indices 9
+# and 10, per-band statistics returned when no rendering rule is supplied.
+LANDSAT_URL = env(
+    "SAGE_LANDSAT_URL",
+    "https://landsat2.arcgis.com/arcgis/rest/services/Landsat8_Views/ImageServer",
+)
+LANDSAT_THERMAL_BAND = 9  # 0-based index into the per-band statistics array
+THERMAL_MAX_SCENES = int(env("SAGE_THERMAL_MAX_SCENES", "4"))
+THERMAL_MAX_YEARS = int(env("SAGE_THERMAL_MAX_YEARS", "5"))
+
+# Level-1 TIRS digital number -> radiance (W m-2 sr-1 um-1).
+THERMAL_RADIANCE_SCALE = 0.0003342
+# K1, K2 constants per sensor; Landsat 9 is not the same as Landsat 8 and using
+# one set for both is a ~0.5 K error that nobody would notice.
+THERMAL_K1_K2 = {
+    "LC08": (774.8853, 1321.0789),
+    "LC09": (799.0284, 1320.3624),
+}
+# A scene whose AOI mean falls outside this band is almost certainly cloudy:
+# cloud tops read ~250 K (-23 C). Probed 2026-11-13, one "0.9% cloud" scene over
+# Hussain Sagar averaged -12 C while clear scenes read +26 C.
+THERMAL_PLAUSIBLE_C = (-5.0, 60.0)
+
+# --------------------------------------------------------------------------
 # Index definitions: our name -> (formula label, ArcGIS raster function, bands)
 # Raster function names verified against the service's rasterFunctionInfos list.
 # --------------------------------------------------------------------------

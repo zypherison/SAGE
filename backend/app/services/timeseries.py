@@ -25,8 +25,9 @@ from typing import Any
 
 from app import config
 from app.errors import INVALID_ARGUMENTS, NO_IMAGERY, AppError
-from app.services import indices
+from app.services import areas, indices
 from app.services.download import acquisitions
+from app.services.geo import bbox_area_km2
 from app.services.net import Fetch
 from app.services.providers import arcgis
 
@@ -78,6 +79,7 @@ async def build(
             "holds a rolling ~14-month window, so older ranges return nothing by design.",
         )
 
+    aoi_km2 = bbox_area_km2(bbox)
     points: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for pick in picks:
@@ -107,6 +109,8 @@ async def build(
                 "min": _value(stats, "min"),
                 "max": _value(stats, "max"),
                 "count": int(stats.get("count") or 0),
+                # Free: the histogram already came back with the statistics.
+                "areas": areas.estimate(index, stats.get("histogram"), aoi_km2),
             }
         )
 
@@ -125,6 +129,7 @@ async def build(
             "delta": round(points[-1]["mean"] - points[0]["mean"], 4),
             "between": [points[0]["date"], points[-1]["date"]],
             "interpretation": "difference between the first and last acquisition, not a fitted trend",
+            "areas": areas.change(points[0].get("areas"), points[-1].get("areas")),
         }
 
     notes = [

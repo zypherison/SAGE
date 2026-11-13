@@ -96,12 +96,45 @@ export interface Histogram {
   max: number | null;
 }
 
+export interface AreaClass {
+  name: string;
+  label: string;
+  threshold: number;
+  above: boolean;
+  basis: string;
+  fraction: number;
+  area_km2: number;
+  uncertainty_km2: number;
+  pixels: number;
+}
+
+export interface AreasEstimate {
+  aoi_km2: number;
+  observed_pixels: number;
+  bin_width: number;
+  classes: AreaClass[];
+  method: string;
+  notes: string[];
+}
+
+export interface AreaChange {
+  name: string;
+  label: string;
+  threshold: number;
+  from_km2: number;
+  to_km2: number;
+  change_km2: number;
+  direction: string;
+  uncertainty_km2: number;
+}
+
 export interface IndexResponse {
   index: string;
   label: string;
   formula: string;
   stats: Stats | null;
   histogram: Histogram | null;
+  areas?: AreasEstimate | null;
   visual_png_url: string | null;
   status: "ok" | "insufficient_data" | "unsupported" | "error";
   message: string | null;
@@ -121,6 +154,7 @@ export interface CompareSide {
   min: number | null;
   max: number | null;
   count: number;
+  areas?: AreasEstimate | null;
   image_url: string;
   width: number;
   height: number;
@@ -133,7 +167,12 @@ export interface CompareResponse {
   bbox: BBox;
   before: CompareSide;
   after: CompareSide;
-  delta: { mean: number; absolute: number; direction: string } | null;
+  delta: {
+    mean: number;
+    absolute: number;
+    direction: string;
+    areas?: AreaChange[];
+  } | null;
   notes: string[];
   generated_at: string;
   citation: string;
@@ -157,6 +196,15 @@ export interface Meta {
   providers: { name: string; indices: boolean; note: string }[];
   rank_weights: Record<string, number>;
   limits: { max_aoi_km2: number; min_aoi_km2: number; min_valid_pixel_fraction: number; max_limit: number };
+  area_classes?: Record<string, { name: string; label: string; threshold: number; above: boolean; basis: string }[]>;
+  thermal?: {
+    variable: string;
+    unit: string;
+    note: string;
+    years: number;
+    scenes_per_year: number;
+    plausible_range_c: number[];
+  };
   network: { request_delay_seconds: number; retries: number; cache_ttl_seconds: number };
 }
 
@@ -168,6 +216,79 @@ export interface TimeseriesPoint {
   min: number | null;
   max: number | null;
   count: number;
+  areas?: AreasEstimate | null;
+}
+
+export interface SeasonalYear {
+  year: number;
+  month: number;
+  acquisitions: number;
+  used: { date: string; objectid: string; cloud_cover_percent: number | null; mean: number | null; pixels: number }[];
+  median: number | null;
+  min: number | null;
+  max: number | null;
+  spread: number | null;
+  areas: { aoi_km2: number; classes: { name: string; label: string; threshold: number; area_km2: number; min_km2: number; max_km2: number; samples: number }[]; aggregation: string } | null;
+}
+
+export interface SeasonalResponse {
+  index: string;
+  label: string;
+  formula: string;
+  month: number;
+  bbox: BBox;
+  aoi_km2: number;
+  count: number;
+  series: SeasonalYear[];
+  skipped_years: { year: number; reason: string }[];
+  change: {
+    first_year: number;
+    last_year: number;
+    first: number;
+    last: number;
+    delta: number;
+    interpretation: string;
+    areas?: AreaChange[];
+  } | null;
+  notes: string[];
+  generated_at?: string;
+  citation?: string;
+}
+
+export interface ThermalYear {
+  year: number;
+  month: number;
+  acquisitions: number;
+  clearest: { day: string; cloud_cover_percent: number | null; value_c: number; name: string | null };
+  median_c: number | null;
+  min_c: number | null;
+  max_c: number | null;
+  spread_c: number | null;
+  rejected: { day: string; reason: string; value_c?: number }[];
+}
+
+export interface ThermalResponse {
+  variable: string;
+  label: string;
+  unit: string;
+  month: number;
+  bbox: BBox;
+  aoi_km2: number;
+  count: number;
+  series: ThermalYear[];
+  skipped_years: { year: number; reason: string }[];
+  change: {
+    first_year: number;
+    last_year: number;
+    first_c: number;
+    last_c: number;
+    delta_c: number;
+    basis: string;
+    interpretation: string;
+  } | null;
+  notes: string[];
+  generated_at?: string;
+  citation?: string;
 }
 
 export interface TimeseriesResponse {
@@ -186,6 +307,7 @@ export interface TimeseriesResponse {
     delta: number;
     between: [string, string];
     interpretation: string;
+    areas?: AreaChange[];
   } | null;
   notes: string[];
 }

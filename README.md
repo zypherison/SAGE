@@ -22,6 +22,16 @@ The planning document that this implements is [`SEMINAR2.md`](SEMINAR2.md).
    network. It is labelled as a fixture in `stats.source` and in the UI, never as live data.
 9. Compares two dates side by side — two pinned acquisitions, two images, a signed difference —
    and puts a copy-ready citation line (`Sentinel-2 L2A … accessed <date>`) in the printed report.
+10. Converts the index histogram it already receives into **class areas in km²** — e.g. NDVI > 0.30
+    covers 132.4 km² ± 9.1 — with the threshold, its basis and the boundary bin's uncertainty
+    reported next to the number. The threshold is a stated definition, not a land-cover product.
+11. Compares the **same calendar month across years** (`/api/seasonal`), so a change is not just
+    the season. Each year is a median across that month's acquisitions — not a pixel-wise
+    composite, because the source silently ignores a median mosaic rule (probed).
+12. Reads **Landsat 8/9 thermal** (`/api/thermal`): at-sensor brightness temperature in °C, same
+    month across up to five years, cloud-contaminated scenes rejected by physical plausibility
+    and listed with the reason. Labelled as brightness temperature, never as land-surface
+temperature.
 
 ## Requirements
 
@@ -69,6 +79,9 @@ The suite is offline: network providers are unit-tested through pure functions o
 | Basemaps are keyless and openly licensed only | OSM standard (ODbL) and OpenTopoMap (CC-BY-SA). CARTO's proprietary `dark_all` style was removed because it is not open data, so there is no hosted dark basemap — the map is light while the panels stay dark. |
 | Provenance never guesses coordinates | Filename gives mission/date/tile; GPS comes from EXIF; otherwise it abstains. |
 | An ambiguous place name returns **409 `ambiguous_place`** with candidates | Adopted from `alephgeo`'s `choose()`: taking the first geocoder hit is how "Tokyo June" became a hairdresser. Pick one by id, or send `best_match: true`. |
+| A **pixel-wise median composite** is not available from the current source | `mosaicMethod: median` is accepted and silently ignored — it returns the identical value to the nonsense method `"banana"`, while `esriMosaicNadir` differs. So `/api/seasonal` reports the median across *acquisitions* of the AOI statistic, and says so in `notes`; it never claims to average pixels. |
+| Thermal is **brightness temperature**, not land-surface temperature | The Landsat Level-1 thermal band gives at-sensor temperature after the Planck calibration; LST additionally needs per-pixel emissivity and atmospheric correction, so the response is labelled `brightness_temperature` and the difference is stated as a few kelvin. |
+| Thermal scenes are rejected by **plausibility**, not by a cloud mask | Catalogue cloud cover is a whole-scene figure: a scene listed at 0.9 % cloud averaged −12 °C over a small AOI (cloud top) while a clear one over the same water read +26 °C. There is no server-side QA mask here, so scenes outside −5…60 °C are listed under `rejected` with that reason. |
 | Responses are cached in-process for **300 s** (names 24 h) | Index statistics describe a mosaic updated daily; a longer cache would return wrong numbers. Every response reports `cache {hits, misses}`. |
 
 ## Layout

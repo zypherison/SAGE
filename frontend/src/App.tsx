@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import MapView from "./components/MapView";
 import { ApiError, api, providerLabel } from "./lib/api";
 import type {
+  AreaChange,
+  AreasEstimate,
   BBox,
   CacheStats,
   CompareResponse,
@@ -13,6 +15,8 @@ import type {
   ProviderStatus,
   ReplayResponse,
   Scene,
+  SeasonalResponse,
+  ThermalResponse,
   TimeseriesResponse,
 } from "./types";
 
@@ -33,6 +37,7 @@ const dday = (iso: string | null): string => (iso ? iso.slice(0, 10) : "—");
 // Download defaults: the last 30 days is the window most users actually mean.
 const TODAY = new Date().toISOString().slice(0, 10);
 const MONTH_AGO = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+const CURRENT_MONTH = new Date().getMonth() + 1;
 
 // One click each, for someone who does not yet know what to ask for.
 const EXAMPLES = [
@@ -88,6 +93,74 @@ function Histogram({ counts, min, max }: { counts: number[]; min: number | null;
         <span>{fmt(min, 2)}</span>
         <span>{fmt(max, 2)}</span>
       </div>
+    </div>
+  );
+}
+
+function ClassAreas({ areas }: { areas: AreasEstimate }) {
+  return (
+    <div className="mt-2 rounded border border-edge bg-ink/30 p-2">
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-slate-500">
+        <span>class area</span>
+        <span className="font-mono normal-case">
+          {areas.aoi_km2.toLocaleString()} km² AOI
+        </span>
+      </div>
+      <div className="mt-1 space-y-1">
+        {areas.classes.map((c) => (
+          <div key={c.name} title={c.basis} className="flex items-baseline justify-between gap-2">
+            <span className="text-[11px] text-slate-300">
+              {c.label}
+              <span className="ml-1 font-mono text-[10px] text-slate-600">
+                {c.above ? ">" : "<"} {c.threshold}
+              </span>
+            </span>
+            <span className="shrink-0 font-mono text-[11px] text-sky-300">
+              {c.area_km2.toLocaleString()} km²
+              <span className="ml-1 text-[10px] text-slate-500">
+                ±{c.uncertainty_km2} · {Math.round(c.fraction * 100)}%
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-1 text-[10px] leading-relaxed text-slate-600">{areas.method}.</p>
+    </div>
+  );
+}
+
+function AreaDeltaTable({ rows }: { rows: AreaChange[] }) {
+  return (
+    <div className="mt-1.5 rounded border border-edge p-1.5">
+      <div className="text-[10px] uppercase tracking-wide text-slate-500">area change</div>
+      {rows.map((r) => (
+        <div key={r.name} className="mt-1 flex items-baseline justify-between gap-2">
+          <span className="text-[11px] text-slate-300">
+            {r.label}{" "}
+            <span className="font-mono text-[10px] text-slate-600">
+              {r.threshold}
+            </span>
+          </span>
+          <span
+            className={`shrink-0 font-mono text-[11px] ${
+              r.change_km2 > 0
+                ? "text-emerald-300"
+                : r.change_km2 < 0
+                  ? "text-rose-300"
+                  : "text-slate-400"
+            }`}
+          >
+            {r.change_km2 > 0 ? "+" : ""}
+            {r.change_km2} km²
+            <span className="ml-1 text-[10px] text-slate-600">
+              {r.from_km2} → {r.to_km2}
+            </span>
+          </span>
+        </div>
+      ))}
+      <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
+        ± boundary bin. Thresholds are definitions of this index, not ground-truth land cover.
+      </p>
     </div>
   );
 }
@@ -292,6 +365,12 @@ export default function App() {
   const [cmpB, setCmpB] = useState(TODAY);
   const [cmp, setCmp] = useState<CompareResponse | null>(null);
   const [cmpBusy, setCmpBusy] = useState(false);
+  const [seaMonth, setSeaMonth] = useState(CURRENT_MONTH);
+  const [seaYears, setSeaYears] = useState(3);
+  const [seasonal, setSeasonal] = useState<SeasonalResponse | null>(null);
+  const [seaBusy, setSeaBusy] = useState(false);
+  const [thermal, setThermal] = useState<ThermalResponse | null>(null);
+  const [thBusy, setThBusy] = useState(false);
 
   useEffect(() => {
     api.meta().then(setMeta).catch(() => setMeta(null));
@@ -454,6 +533,48 @@ export default function App() {
       setCmpBusy(false);
     }
   }, [bbox, indexKey, cmpA, cmpB]);
+
+  const runSeasonal = useCallback(async () => {
+    if (!bbox) return;
+    setSeaBusy(true);
+    setError(null);
+    setErrorCode(null);
+    try {
+      setSeasonal(
+        await api.seasonal({ bbox, index: indexKey, month: seaMonth, years: seaYears }),
+      );
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErrorCode(e.code);
+        setError(e.message);
+      } else {
+        setError((e as Error).message);
+      }
+      setSeasonal(null);
+    } finally {
+      setSeaBusy(false);
+    }
+  }, [bbox, indexKey, seaMonth, seaYears]);
+
+  const runThermal = useCallback(async () => {
+    if (!bbox) return;
+    setThBusy(true);
+    setError(null);
+    setErrorCode(null);
+    try {
+      setThermal(await api.thermal({ bbox, month: seaMonth, years: seaYears }));
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErrorCode(e.code);
+        setError(e.message);
+      } else {
+        setError((e as Error).message);
+      }
+      setThermal(null);
+    } finally {
+      setThBusy(false);
+    }
+  }, [bbox, seaMonth, seaYears]);
 
   const loadDemo = useCallback(async () => {
     try {
@@ -1018,6 +1139,7 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {cmp.delta?.areas?.length ? <AreaDeltaTable rows={cmp.delta.areas} /> : null}
                 <ul className="mt-1 space-y-0.5">
                   {cmp.notes.map((note, i) => (
                     <li key={i} className="text-[10px] leading-relaxed text-slate-600">
@@ -1025,6 +1147,137 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+          </div>
+
+          {/* same month across years + thermal */}
+          <div className="mt-4 rounded-lg border border-edge bg-ink/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                Season-controlled comparison
+              </span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={seaMonth}
+                  onChange={(e) => setSeaMonth(Math.min(12, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-11 rounded border border-edge bg-ink px-1 py-0.5 font-mono text-[10px] text-slate-200"
+                  title="calendar month"
+                />
+                <select
+                  value={seaYears}
+                  onChange={(e) => setSeaYears(Number(e.target.value))}
+                  className="rounded border border-edge bg-ink px-1 py-0.5 text-[10px] text-slate-300"
+                  title="number of years"
+                >
+                  {[2, 3].map((y) => (
+                    <option key={y} value={y}>
+                      {y} yrs
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <button
+              onClick={() => void runSeasonal()}
+              disabled={!bbox || seaBusy}
+              className="mt-2 w-full rounded-md border border-edge py-1.5 text-[11px] text-slate-300 transition hover:border-sky-500/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {seaBusy ? "Sampling same month…" : `Same month, ${seaYears} years (${indexKey.toUpperCase()})`}
+            </button>
+
+            {seasonal && (
+              <div className="mt-2 rounded border border-edge bg-ink/30 p-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-300">
+                  <span>
+                    {seasonal.label} · month {String(seasonal.month).padStart(2, "0")}
+                  </span>
+                  {seasonal.change ? (
+                    <span
+                      className={`font-mono ${
+                        seasonal.change.delta >= 0 ? "text-emerald-300" : "text-rose-300"
+                      }`}
+                    >
+                      Δ {seasonal.change.delta > 0 ? "+" : ""}
+                      {seasonal.change.delta.toFixed(4)}
+                    </span>
+                  ) : null}
+                </div>
+                {seasonal.series.map((y) => (
+                  <div key={y.year} className="mt-1 flex items-baseline justify-between font-mono text-[10px]">
+                    <span className="text-slate-400">
+                      {y.year} · {y.acquisitions} scene{y.acquisitions === 1 ? "" : "s"}
+                    </span>
+                    <span className="text-slate-200">
+                      {fmt(y.median, 3)}
+                      <span className="ml-1 text-slate-600">
+                        ({fmt(y.min, 2)}–{fmt(y.max, 2)})
+                      </span>
+                    </span>
+                  </div>
+                ))}
+                {seasonal.series.map((y) =>
+                  y.areas ? (
+                    <div key={`area-${y.year}`} className="mt-0.5 font-mono text-[10px] text-slate-500">
+                      {y.year}:{" "}
+                      {y.areas.classes.map((c) => `${c.label} ${c.area_km2} km²`).join(" · ")}
+                    </div>
+                  ) : null,
+                )}
+                {seasonal.change?.areas?.length ? (
+                  <AreaDeltaTable rows={seasonal.change.areas} />
+                ) : null}
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
+                  {seasonal.notes[0]}
+                </p>
+              </div>
+            )}
+
+            <button
+              onClick={() => void runThermal()}
+              disabled={!bbox || thBusy}
+              className="mt-1.5 w-full rounded-md border border-edge py-1.5 text-[11px] text-slate-300 transition hover:border-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {thBusy ? "Reading Landsat thermal…" : "Surface heat (Landsat, °C)"}
+            </button>
+
+            {thermal && (
+              <div className="mt-2 rounded border border-edge bg-ink/30 p-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-300">
+                  <span>
+                    {thermal.label} · month {String(thermal.month).padStart(2, "0")}
+                  </span>
+                  {thermal.change ? (
+                    <span
+                      className={`font-mono ${
+                        thermal.change.delta_c >= 0 ? "text-rose-300" : "text-emerald-300"
+                      }`}
+                    >
+                      Δ {thermal.change.delta_c > 0 ? "+" : ""}
+                      {thermal.change.delta_c} °C
+                    </span>
+                  ) : null}
+                </div>
+                {thermal.series.map((y) => (
+                  <div key={y.year} className="mt-1 flex items-baseline justify-between font-mono text-[10px]">
+                    <span className="text-slate-400">
+                      {y.year} · {y.acquisitions} scene{y.acquisitions === 1 ? "" : "s"}
+                    </span>
+                    <span className="text-slate-200">
+                      {fmt(y.median_c, 1)} °C
+                      <span className="ml-1 text-slate-600">
+                        ({fmt(y.min_c, 1)}–{fmt(y.max_c, 1)})
+                      </span>
+                    </span>
+                  </div>
+                ))}
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
+                  {thermal.notes[0]}
+                </p>
               </div>
             )}
           </div>
@@ -1073,6 +1326,7 @@ export default function App() {
                       max={result.histogram.max}
                     />
                   ) : null}
+                  {result.areas ? <ClassAreas areas={result.areas} /> : null}
                   <div className="mt-2 text-[10px] text-slate-600">
                     source: {result.stats.source} · function: {result.stats.raster_function}
                   </div>

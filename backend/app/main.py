@@ -45,6 +45,8 @@ from app.schemas import (
     QueryResponse,
     SearchRequest,
     SearchResponse,
+    SeasonalRequest,
+    ThermalRequest,
     TimeseriesRequest,
 )
 from app.services import (
@@ -56,6 +58,8 @@ from app.services import (
     indices,
     locality,
     provenance,
+    seasons,
+    thermal,
     timeseries,
 )
 from app.services.geo import bbox_area_km2, bbox_span_km, geometry_bbox, validate_bbox
@@ -150,6 +154,23 @@ async def meta() -> dict[str, Any]:
              "note": "rolling ~14-month window"},
         ],
         "rank_weights": config.RANK_WEIGHTS,
+        "area_classes": {
+            k: [
+                {"name": c["name"], "label": c["label"], "threshold": c["threshold"],
+                 "above": c["above"], "basis": c["basis"]}
+                for c in v
+            ]
+            for k, v in config.AREA_CLASSES.items()
+        },
+        "thermal": {
+            "variable": "brightness_temperature",
+            "unit": "°C",
+            "note": "At-sensor brightness temperature (Landsat 8/9 TIRS), not land surface "
+                    "temperature: no emissivity or atmospheric correction.",
+            "years": config.THERMAL_MAX_YEARS,
+            "scenes_per_year": config.THERMAL_MAX_SCENES,
+            "plausible_range_c": list(config.THERMAL_PLAUSIBLE_C),
+        },
         "limits": {
             "max_stats_span_km": config.MAX_STATS_SPAN_KM,
             "locality_buffer_km": config.LOCALITY_BUFFER_KM,
@@ -398,6 +419,46 @@ async def compare_endpoint(req: CompareRequest) -> dict[str, Any]:
     accessed = datetime.now(timezone.utc)
     result["generated_at"] = accessed.isoformat()
     result["citation"] = _citation(accessed)
+    return result
+
+
+@app.post("/api/seasonal")
+async def seasonal_endpoint(req: SeasonalRequest) -> dict[str, Any]:
+    """One calendar month across years, so the season is held constant."""
+    bbox = _resolve_bbox(req.bbox, req.geometry)
+    async with connection() as fetch:
+        result = await seasons.build(
+            fetch,
+            bbox=bbox,
+            index=req.index,
+            month=req.month,
+            years=req.years,
+            max_cloud=req.max_cloud,
+        )
+    accessed = datetime.now(timezone.utc)
+    result["generated_at"] = accessed.isoformat()
+    result["citation"] = _citation(accessed)
+    return result
+
+
+@app.post("/api/thermal")
+async def thermal_endpoint(req: ThermalRequest) -> dict[str, Any]:
+    """Landsat 8/9 brightness temperature for the same month across years."""
+    bbox = _resolve_bbox(req.bbox, req.geometry)
+    async with connection() as fetch:
+        result = await thermal.build(
+            fetch,
+            bbox=bbox,
+            month=req.month,
+            years=req.years,
+            max_scenes=req.max_scenes,
+        )
+    accessed = datetime.now(timezone.utc)
+    result["generated_at"] = accessed.isoformat()
+    result["citation"] = (
+        "Landsat 8/9 Level-1 TIRS brightness temperature (100 m), USGS/NASA via ArcGIS "
+        f"Landsat8_Views ImageServer; accessed {accessed.date().isoformat()}."
+    )
     return result
 
 

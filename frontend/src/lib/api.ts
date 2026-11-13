@@ -10,6 +10,8 @@ import type {
   QueryResponse,
   ReplayResponse,
   SearchResponse,
+  SeasonalResponse,
+  ThermalResponse,
   TimeseriesResponse,
 } from "../types";
 
@@ -126,6 +128,18 @@ export const api = {
     request<CompareResponse>("/api/compare", {
       method: "POST",
       body: JSON.stringify(params),
+    }),
+
+  seasonal: (params: { bbox: BBox; index: string; month?: number; years?: number }) =>
+    request<SeasonalResponse>("/api/seasonal", {
+      method: "POST",
+      body: JSON.stringify({ bbox: params.bbox, index: params.index, month: params.month ?? null, years: params.years ?? null }),
+    }),
+
+  thermal: (params: { bbox: BBox; month?: number; years?: number }) =>
+    request<ThermalResponse>("/api/thermal", {
+      method: "POST",
+      body: JSON.stringify({ bbox: params.bbox, month: params.month ?? null, years: params.years ?? null }),
     }),
 
   /** A cached fixture, for demonstrating without network access. */

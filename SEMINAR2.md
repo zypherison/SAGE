@@ -52,6 +52,27 @@ Every row below was executed, not assumed.
 2. It covers **only the last ~14 months**. It therefore cannot serve historical queries, and must be presented as a *current-condition* source, not an archive. Any claim of "historical analysis" must route to STAC.
 3. Earth Search's `datetime` is **strict RFC3339** (needs `T…Z`). Its **CQL2 `filter` extension is accepted but silently ignored** — a `<20 %` filter still returned a 96.7 % cloud scene — while the `query` extension does work. The adapter therefore uses `query` **and re-filters client-side**. A prototype that "works on my machine" with a lenient date string, or that trusts a filter the server ignores, returns wrong results while looking perfectly healthy.
 
+### 0.1.1 Probes added for the second iteration (run 2026-11-13)
+
+These were run while adding class areas, same-month comparison and thermal change. Two of them
+overturned an assumption, which is why they are recorded here rather than in a commit message.
+
+| Probe | Command target | Result |
+|---|---|---|
+| Histogram shape | `computeStatisticsHistograms` + `NDVI Raw` over the 708 km² AOI | **256 bins** spanning the *observed* min/max (`−0.2668…0.5164`), not a fixed −1…1 range. So a class threshold can be applied to bin centres, and the bin width is the honest resolution limit of the estimate. |
+| Median mosaic rule | `mosaicRule: {"mosaicMethod":"median"}` vs `"banana"` vs `esriMosaicNadir` | **`median` and `banana` return the identical mean (0.1196); `esriMosaicNadir` returns a different one.** The rule is parsed, `median` is simply not a valid method, and the service answers HTTP 200 without complaint. A pixel-wise median composite is therefore **not available**; the same-month comparison reports the median across *acquisitions* instead. |
+| Time filter on statistics | statistics call with `time` limited to Nov 2026 | **Works** — mean changes from 0.1196 (no window) to 0.1516 (windowed), unlike `exportImage`, which returns a blank 4 KB PNG for a windowed request. Per-acquisition pinning by `objectid` remains the safest route and is what the code uses. |
+| Landsat thermal availability | `Landsat8_Views/ImageServer?f=json` | `bandCount=11`, thermal at indices **9/10**, pixel type `S16`, archive **2020-01-01 → present**. Catalogue fields are capitalised (`OBJECTID`, `AcquisitionDate`, `CloudCover`, `Name`); lowercase `outFields` silently yields nulls. |
+| Thermal calibration sanity check | DN → radiance (`×0.0003342`) → inverse Planck, Landsat 8 constants | Water **26.5 °C**, urban **29.7 °C** over Hussain Sagar — a +3.2 °C heat-island ordering that matches expectation, so the calibration path is sound. |
+| Thermal cloud contamination | five Novembers of the same AOI | Hand-checked: a scene listed at **0.9 % cloud averaged −12 °C** (cloud top) while a clear scene read **+26 °C**; within Nov 2025 alone the three usable scenes read 25.9 / 16.1 / 11.0 °C. Catalogue cloud cover is a whole-scene figure and cannot be trusted over a small AOI, and this endpoint exposes no QA mask — so the service rejects scenes outside a plausible physical range and reports the spread. |
+
+**What this changes in the argument.** Tier 1 (class areas) is a threshold on data we already had,
+so it adds no request and no new source; Tier 2 is honest only if it is described as a median
+*across acquisitions*, because the pixel-wise version is unavailable; Tier 3 must be described as
+**at-sensor brightness temperature**, because LST would require emissivity and an atmospheric
+correction this service does not provide. Each of those is a narrower claim than the obvious one,
+and each is the claim the measurement can actually support.
+
 ### 0.2 What the `Aleph` reference contributed
 
 `Aleph/aleph.py` + `src/` is `alephgeo` 0.2.0 (MIT, Belluxx) — a dependency-light Python CLI (Pillow + numpy only, no API key) that resolves a place, plans a capture, then downloads satellite / Street View / OSM / terrain products into a resumable run folder. It is a *capture* tool, not an analysis tool, so it contributes engineering discipline rather than spectral method. Four patterns were adopted verbatim in shape:

@@ -200,6 +200,27 @@ class TimeseriesRequest(BaseModel):
     max_cloud: float | None = 40.0
 
 
+class SeasonalRequest(BaseModel):
+    """The same calendar month across years, to hold the season constant."""
+
+    bbox: list[float] | None = None
+    geometry: dict[str, Any] | None = None
+    index: str = "ndvi"
+    month: int | None = None  # defaults to the current month
+    years: int | None = None  # defaults to 3, capped by config
+    max_cloud: float | None = 40.0
+
+
+class ThermalRequest(BaseModel):
+    """Landsat 8/9 brightness temperature, same month across years."""
+
+    bbox: list[float] | None = None
+    geometry: dict[str, Any] | None = None
+    month: int | None = None
+    years: int | None = None
+    max_scenes: int | None = None
+
+
 class ProvenanceResult(BaseModel):
     confidence: str  # exact | tile | unknown
     mission: str | None = None

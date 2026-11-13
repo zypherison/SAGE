@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from app import config
 from app.errors import AOI_TOO_LARGE, UNKNOWN_INDEX, AppError
+from app.services import areas
 from app.services.geo import bbox_area_km2, bbox_span_km, validate_bbox
 from app.services.net import Fetch
 from app.services.providers import arcgis
@@ -160,5 +161,9 @@ async def compute(fetch: Fetch, *, index: str, bbox: list[float]) -> dict:
             "raster_function": str(function),
         },
         "histogram": raw.get("histogram"),
+        # The histogram is already in this response, so the class areas cost no
+        # extra request. They are a second reading of the same pixels, not an
+        # independent measurement of land cover.
+        "areas": areas.estimate(key, raw.get("histogram"), area),
         "visual_png_url": arcgis.visual_url(bbox, str(spec["arcgis_visual"])),
     }

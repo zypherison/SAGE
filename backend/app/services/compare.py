@@ -18,8 +18,9 @@ from typing import Any
 
 from app import config
 from app.errors import INVALID_ARGUMENTS, NO_IMAGERY, AppError
-from app.services import indices
+from app.services import areas, indices
 from app.services.download import export_size
+from app.services.geo import bbox_area_km2
 from app.services.net import Fetch
 from app.services.providers import arcgis
 
@@ -80,6 +81,7 @@ async def _one(
     *,
     bbox: list[float],
     spec: dict[str, Any],
+    index: str,
     day: str,
     max_cloud: float | None,
     rendering: str | None,
@@ -113,6 +115,7 @@ async def _one(
         "min": value("min"),
         "max": value("max"),
         "count": int(stats.get("count") or 0),
+        "areas": areas.estimate(index, stats.get("histogram"), bbox_area_km2(bbox)),
         "image_url": arcgis.scene_url(
             bbox, objectid=pick.id, rendering_rule=rendering, size=size
         ),
@@ -144,13 +147,14 @@ async def build(
     size = export_size(bbox)
     rendering = str(spec["arcgis_visual"])
 
+    key = index.lower()
     before = await _one(
-        fetch, bbox=bbox, spec=spec, day=date_a,
+        fetch, bbox=bbox, spec=spec, index=key, day=date_a,
         max_cloud=max_cloud, rendering=rendering, size=size,
         window_days=config.COMPARE_WINDOW_DAYS,
     )
     after = await _one(
-        fetch, bbox=bbox, spec=spec, day=date_b,
+        fetch, bbox=bbox, spec=spec, index=key, day=date_b,
         max_cloud=max_cloud, rendering=rendering, size=size,
         window_days=config.COMPARE_WINDOW_DAYS,
     )
@@ -162,6 +166,8 @@ async def build(
             "mean": round(raw, 4),
             "absolute": round(abs(raw), 4),
             "direction": "increase" if raw > 0 else ("decrease" if raw < 0 else "unchanged"),
+            # km² is the number a report can quote; the index delta alone is not.
+            "areas": areas.change(before.get("areas"), after.get("areas")),
         }
 
     notes = [
