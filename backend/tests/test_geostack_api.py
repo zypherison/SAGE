@@ -32,6 +32,41 @@ def test_capabilities_lists_installed_versions():
     assert isinstance(body["missing"], list)
 
 
+def test_the_core_app_and_capabilities_survive_without_the_stack():
+    """The whole point of the split: no GDAL, still a working API."""
+    import json as jsonlib
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    code = """
+import sys
+BLOCK = {'rasterio', 'geopandas', 'geemap', 'ee', 'pyproj', 'shapely'}
+class Block:
+    def find_spec(self, name, path=None, target=None):
+        if name.split('.')[0] in BLOCK:
+            raise ImportError('blocked ' + name)
+        return None
+sys.meta_path.insert(0, Block())
+import json
+from fastapi.testclient import TestClient
+from app.main import app
+c = TestClient(app)
+r = c.get('/api/geo/capabilities')
+print(json.dumps({'health': c.get('/health').status_code,
+                  'caps': r.status_code,
+                  'raster_ready': r.json()['raster_ready'],
+                  'missing': len(r.json()['missing'])}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=backend, capture_output=True, text=True, timeout=180
+    )
+    assert result.returncode == 0, result.stderr[-800:]
+    payload = jsonlib.loads(result.stdout.strip().splitlines()[-1])
+    assert payload == {"health": 200, "caps": 200, "raster_ready": False, "missing": 6}
+
+
 def test_aoi_endpoint_measures_a_triangle():
     response = client.post("/api/geo/aoi", json={"geometry": AOI})
     assert response.status_code == 200

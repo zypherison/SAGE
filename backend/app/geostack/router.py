@@ -1,14 +1,14 @@
 """HTTP surface for the optional geospatial stack, mounted at /api/geo.
 
 Handlers are synchronous on purpose: rasterio and geopandas block, so FastAPI
-runs these in its threadpool instead of stalling the event loop. Imports of the
-heavy modules happen inside each handler, which keeps the core API importable on
-a machine without GDAL.
+runs these in its threadpool instead of stalling the event loop. No handler
+imports a heavy module at module scope, and a missing one becomes a 503 with the
+package named, so this router can be mounted on a machine without GDAL.
 """
 from __future__ import annotations
 
 import hashlib
-import re
+import importlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,13 +18,31 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import config
-from app.services import evidence
-from app.errors import AOI_TOO_LARGE, INVALID_ARGUMENTS, AppError
+from app.errors import AOI_TOO_LARGE, GEOSTACK_UNAVAILABLE, INVALID_ARGUMENTS, AppError
 from app.geostack import capabilities
+from app.services import evidence
 
 router = APIRouter(prefix="/api/geo", tags=["geostack"])
 
-PREVIEW_RE = re.compile(r"^[a-f0-9]{16}\.png$")
+
+def _load(name: str) -> Any:
+    """Import a geostack submodule, translating a missing dependency to 503."""
+    try:
+        return importlib.import_module(f"app.geostack.{name}")
+    except ImportError as exc:
+        raise AppError(
+            GEOSTACK_UNAVAILABLE,
+            f"{name} needs a package that is not installed: {exc}",
+            module=name,
+            install="pip install -r backend/requirements-geo.txt",
+        ) from exc
+
+
+def _listing(directory: str, pattern: str) -> list[dict[str, Any]]:
+    root = Path(directory)
+    if not root.exists():
+        return []
+    return [{"name": p.name, "bytes": p.stat().st_size} for p in sorted(root.glob(pattern))]
 
 
 class AoiRequest(BaseModel):
@@ -72,9 +90,7 @@ class MapRequest(BaseModel):
     date_to: str | None = None
 
 
-def _check_area(geometry: dict[str, Any]) -> dict[str, Any]:
-    from app.geostack import vector
-
+def _check_area(vector: Any, geometry: dict[str, Any]) -> dict[str, Any]:
     metrics = vector.analyze(geometry)
     if metrics["area_km2"] > config.MAX_AOI_AREA_KM2:
         raise AppError(
@@ -86,15 +102,13 @@ def _check_area(geometry: dict[str, Any]) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# capability discovery
+# capability discovery (must work with nothing installed)
 # --------------------------------------------------------------------------
 @router.get("/capabilities")
 def stack_capabilities() -> dict[str, Any]:
-    from app.geostack import maps, population
-
     report = capabilities.report()
-    report["worldpop_cached"] = population.cached()
-    report["maps"] = maps.stored()[:5]
+    report["worldpop_cached"] = _listing(config.WORLDPOP_CACHE_DIR, "*.tif")
+    report["maps"] = _listing(config.MAP_DIR, "*.html")[:5]
     return report
 
 
@@ -103,8 +117,7 @@ def stack_capabilities() -> dict[str, Any]:
 # --------------------------------------------------------------------------
 @router.post("/aoi")
 def aoi_metrics(body: AoiRequest) -> dict[str, Any]:
-    from app.geostack import vector
-
+    vector = _load("vector")
     metrics = vector.analyze(body.geometry)
     if metrics["area_km2"] > config.MAX_AOI_AREA_KM2:
         raise AppError(AOI_TOO_LARGE, "AOI is above the configured area limit", area_km2=metrics["area_km2"])
@@ -116,9 +129,9 @@ def aoi_metrics(body: AoiRequest) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 @router.post("/scene")
 def find_scene(body: SceneRequest) -> dict[str, Any]:
-    from app.geostack import stac
-
-    _check_area(body.geometry)
+    vector = _load("vector")
+    stac = _load("stac")
+    _check_area(vector, body.geometry)
     items = stac.search(
         body.geometry,
         date_from=body.date_from,
@@ -143,9 +156,11 @@ def find_scene(body: SceneRequest) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 @router.post("/index")
 def raster_index(body: RasterIndexRequest) -> dict[str, Any]:
-    from app.geostack import raster, stac
+    vector = _load("vector")
+    raster = _load("raster")
+    stac = _load("stac")
 
-    metrics = _check_area(body.geometry)
+    metrics = _check_area(vector, body.geometry)
     item, hrefs, candidates = stac.latest(
         body.geometry,
         index=body.index,
@@ -225,8 +240,12 @@ def raster_index(body: RasterIndexRequest) -> dict[str, Any]:
 
 @router.get("/preview/{name}")
 def preview(name: str) -> FileResponse:
-    if not PREVIEW_RE.match(name):
+    if not name.endswith(".png") or len(name) != 20:
         raise AppError(INVALID_ARGUMENTS, "preview name must be a 16-character hex id plus .png")
+    try:
+        int(name[:16], 16)
+    except ValueError:
+        raise AppError(INVALID_ARGUMENTS, "preview name must be a 16-character hex id plus .png") from None
     path = Path(config.MAP_DIR) / "previews" / name
     if not path.exists():
         raise AppError("evidence_not_found", f"no preview named {name}")
@@ -238,10 +257,11 @@ def preview(name: str) -> FileResponse:
 # --------------------------------------------------------------------------
 @router.post("/population")
 def worldpop(body: PopulationRequest) -> dict[str, Any]:
-    from app.geostack import population as wp
+    vector = _load("vector")
+    module = _load("population")
 
-    metrics = _check_area(body.geometry)
-    result = wp.estimate(body.geometry, iso3=body.iso3, year=body.year)
+    metrics = _check_area(vector, body.geometry)
+    result = module.estimate(body.geometry, iso3=body.iso3, year=body.year)
     result["aoi"] = metrics
     if result.get("pixels_used", 0) < 25:
         result.setdefault("notes", []).append(
@@ -255,13 +275,12 @@ def worldpop(body: PopulationRequest) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 @router.post("/composite")
 def earth_composite(body: CompositeRequest) -> dict[str, Any]:
-    from app.geostack import earth
+    vector = _load("vector")
+    raster = _load("raster")
+    earth = _load("earth")
 
-    _check_area(body.geometry)
-    if body.index not in ("ndvi", "ndwi", "ndbi", "nbr", "ndmi"):
-        from app.geostack import raster
-
-        raster.spec(body.index)  # raises unknown_index with the valid list
+    _check_area(vector, body.geometry)
+    raster.spec(body.index)  # raises unknown_index with the valid list
     result = earth.index_stats(
         body.geometry,
         index=body.index,
@@ -278,9 +297,10 @@ def earth_composite(body: CompositeRequest) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 @router.post("/map")
 def make_map(body: MapRequest) -> dict[str, Any]:
-    from app.geostack import maps
+    vector = _load("vector")
+    maps = _load("maps")
 
-    _check_area(body.geometry)
+    _check_area(vector, body.geometry)
     return maps.build(
         body.geometry,
         title=body.title,
@@ -292,6 +312,5 @@ def make_map(body: MapRequest) -> dict[str, Any]:
 
 @router.get("/map/{name}")
 def serve_map(name: str) -> FileResponse:
-    from app.geostack import maps
-
+    maps = _load("maps")
     return FileResponse(maps.path_for(name), media_type="text/html")

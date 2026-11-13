@@ -27,7 +27,12 @@ MODULES: dict[str, str] = {
 
 
 def installed(module: str) -> bool:
-    return importlib.util.find_spec(module) is not None
+    # A broken or half-installed package can raise from find_spec; that is
+    # "not available", not a reason for the capability probe to return 500.
+    try:
+        return importlib.util.find_spec(module) is not None
+    except Exception:
+        return False
 
 
 def version(module: str) -> str | None:
