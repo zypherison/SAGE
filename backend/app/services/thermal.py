@@ -27,7 +27,7 @@ from typing import Any
 
 from app import config
 from app.errors import INVALID_ARGUMENTS, NO_IMAGERY, AppError
-from app.services.geo import bbox_area_km2
+from app.services.geo import bbox_area_km2, geometry_area_km2
 from app.services.net import Fetch
 from app.services.providers import landsat
 
@@ -53,6 +53,7 @@ async def build(
     month: int | None = None,
     years: int | None = None,
     max_scenes: int | None = None,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     today = date.today()
     month = today.month if month is None else int(month)
@@ -85,12 +86,14 @@ async def build(
         rejected: list[dict[str, Any]] = []
         for scene in scenes[:limit]:
             try:
-                stats = await landsat.band_statistics(
-                    fetch,
-                    bbox=bbox,
-                    band_index=config.LANDSAT_THERMAL_BAND,
-                    objectid=scene["objectid"],
-                )
+                stats_kwargs: dict[str, Any] = {
+                    "bbox": bbox,
+                    "band_index": config.LANDSAT_THERMAL_BAND,
+                    "objectid": scene["objectid"],
+                }
+                if geometry is not None:
+                    stats_kwargs["geometry"] = geometry
+                stats = await landsat.band_statistics(fetch, **stats_kwargs)
             except AppError as exc:
                 rejected.append({**scene, "reason": str(exc)[:160]})
                 continue
@@ -181,7 +184,9 @@ async def build(
         "unit": "°C",
         "month": month,
         "bbox": [round(v, 6) for v in bbox],
-        "aoi_km2": round(bbox_area_km2(bbox), 1),
+        "aoi_km2": round(
+            geometry_area_km2(geometry) if geometry is not None else bbox_area_km2(bbox), 1
+        ),
         "source": {
             "provider": landsat.NAME,
             "service": config.LANDSAT_URL,

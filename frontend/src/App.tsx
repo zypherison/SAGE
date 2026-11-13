@@ -12,6 +12,7 @@ import type {
   Meta,
   Plan,
   Place,
+  PolygonGeometry,
   ProviderStatus,
   ReplayResponse,
   Scene,
@@ -31,6 +32,22 @@ const areaKm2 = (b: BBox): number => {
   const h = Math.abs(b[3] - b[1]) * 111.32;
   return w * h;
 };
+
+const ringAreaKm2 = (ring: number[][]): number => {
+  if (ring.length < 4) return 0;
+  let total = 0;
+  for (let i = 0; i < ring.length - 1; i += 1) {
+    const lon1 = (ring[i][0] * Math.PI) / 180;
+    const lat1 = (ring[i][1] * Math.PI) / 180;
+    const lon2 = (ring[i + 1][0] * Math.PI) / 180;
+    const lat2 = (ring[i + 1][1] * Math.PI) / 180;
+    total += (lon2 - lon1) * (2 + Math.sin(lat1) + Math.sin(lat2));
+  }
+  return (Math.abs(total) * 6371.0088 * 6371.0088) / 2;
+};
+
+const polygonAreaKm2 = (geom: PolygonGeometry): number =>
+  ringAreaKm2(geom.coordinates[0] ?? []);
 
 const dday = (iso: string | null): string => (iso ? iso.slice(0, 10) : "—");
 
@@ -337,7 +354,8 @@ export default function App() {
   const [text, setText] = useState(DEFAULT_QUERY);
   const [intent, setIntent] = useState<Intent | null>(null);
   const [bbox, setBbox] = useState<BBox | null>(null);
-  const [drawMode, setDrawMode] = useState(false);
+  const [geometry, setGeometry] = useState<PolygonGeometry | null>(null);
+  const [drawMode, setDrawMode] = useState<"none" | "rect" | "polygon">("none");
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -410,6 +428,7 @@ export default function App() {
         setCandidates(res.candidates ?? []);
         setPlan(res.plan);
         if (res.bbox) setBbox(res.bbox as BBox);
+        setGeometry(null);
         setScenes(res.search?.scenes ?? []);
         setProviders(res.search?.providers ?? []);
         setWarnings(res.search?.warnings ?? []);
@@ -462,9 +481,10 @@ export default function App() {
     [intent],
   );
 
-  const handleBbox = useCallback(
-    (box: BBox) => {
+  const handleAoi = useCallback(
+    (box: BBox, poly: PolygonGeometry | null) => {
       setBbox(box);
+      setGeometry(poly);
       setResult(null);
       setReplay(null);
       if (box) void runSearch(box);
@@ -478,14 +498,14 @@ export default function App() {
     setError(null);
     setReplay(null);
     try {
-      setResult(await api.index(indexKey, bbox));
+      setResult(await api.index(indexKey, bbox, geometry));
     } catch (e) {
       setError((e as Error).message);
       setResult(null);
     } finally {
       setBusy(null);
     }
-  }, [bbox, indexKey]);
+  }, [bbox, indexKey, geometry]);
 
   const runSeries = useCallback(async () => {
     if (!bbox) return;
@@ -499,6 +519,7 @@ export default function App() {
           index: indexKey,
           date_from: intent?.date_from ?? null,
           date_to: intent?.date_to ?? null,
+          geometry,
         }),
       );
     } catch (e) {
@@ -512,7 +533,7 @@ export default function App() {
     } finally {
       setTsBusy(false);
     }
-  }, [bbox, indexKey, intent]);
+  }, [bbox, indexKey, intent, geometry]);
 
   const runCompare = useCallback(async () => {
     if (!bbox) return;
@@ -520,7 +541,9 @@ export default function App() {
     setError(null);
     setErrorCode(null);
     try {
-      setCmp(await api.compare({ bbox, index: indexKey, date_a: cmpA, date_b: cmpB }));
+      setCmp(
+        await api.compare({ bbox, index: indexKey, date_a: cmpA, date_b: cmpB, geometry }),
+      );
     } catch (e) {
       if (e instanceof ApiError) {
         setErrorCode(e.code);
@@ -532,7 +555,7 @@ export default function App() {
     } finally {
       setCmpBusy(false);
     }
-  }, [bbox, indexKey, cmpA, cmpB]);
+  }, [bbox, indexKey, cmpA, cmpB, geometry]);
 
   const runSeasonal = useCallback(async () => {
     if (!bbox) return;
@@ -541,7 +564,13 @@ export default function App() {
     setErrorCode(null);
     try {
       setSeasonal(
-        await api.seasonal({ bbox, index: indexKey, month: seaMonth, years: seaYears }),
+        await api.seasonal({
+          bbox,
+          index: indexKey,
+          month: seaMonth,
+          years: seaYears,
+          geometry,
+        }),
       );
     } catch (e) {
       if (e instanceof ApiError) {
@@ -554,7 +583,7 @@ export default function App() {
     } finally {
       setSeaBusy(false);
     }
-  }, [bbox, indexKey, seaMonth, seaYears]);
+  }, [bbox, indexKey, seaMonth, seaYears, geometry]);
 
   const runThermal = useCallback(async () => {
     if (!bbox) return;
@@ -562,7 +591,7 @@ export default function App() {
     setError(null);
     setErrorCode(null);
     try {
-      setThermal(await api.thermal({ bbox, month: seaMonth, years: seaYears }));
+      setThermal(await api.thermal({ bbox, month: seaMonth, years: seaYears, geometry }));
     } catch (e) {
       if (e instanceof ApiError) {
         setErrorCode(e.code);
@@ -574,12 +603,13 @@ export default function App() {
     } finally {
       setThBusy(false);
     }
-  }, [bbox, seaMonth, seaYears]);
+  }, [bbox, seaMonth, seaYears, geometry]);
 
   const loadDemo = useCallback(async () => {
     try {
       const demo = await api.demo();
       setBbox(demo.bbox);
+      setGeometry(null);
       setResult(demo);
       setSeries(null);
       setReplay(null);
@@ -648,18 +678,19 @@ export default function App() {
             stats: result?.stats ?? null,
             generated_at: new Date().toISOString(),
           },
-          geometry: {
-            type: "Polygon",
-            coordinates: [
-              [
-                [bbox[0], bbox[1]],
-                [bbox[2], bbox[1]],
-                [bbox[2], bbox[3]],
-                [bbox[0], bbox[3]],
-                [bbox[0], bbox[1]],
+          geometry:
+            geometry ?? {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [bbox[0], bbox[1]],
+                  [bbox[2], bbox[1]],
+                  [bbox[2], bbox[3]],
+                  [bbox[0], bbox[3]],
+                  [bbox[0], bbox[1]],
+                ],
               ],
-            ],
-          },
+            },
         },
       ],
     };
@@ -671,7 +702,7 @@ export default function App() {
     a.download = `sage2-${indexKey}-${result?.evidence_id ?? "aoi"}.geojson`;
     a.click();
     URL.revokeObjectURL(a.href);
-  }, [bbox, indexKey, result]);
+  }, [bbox, indexKey, result, geometry]);
 
   const runDownload = useCallback(async () => {
     if (!bbox) return;
@@ -894,14 +925,24 @@ export default function App() {
                   Demo
                 </button>
                 <button
-                  onClick={() => setDrawMode((v) => !v)}
+                  onClick={() => setDrawMode(drawMode === "rect" ? "none" : "rect")}
                   className={`rounded px-2 py-1 text-[11px] font-medium transition ${
-                    drawMode
+                    drawMode === "rect"
                       ? "bg-sky-500 text-ink"
                       : "border border-edge text-slate-300 hover:border-sky-500/60"
                   }`}
                 >
-                  {drawMode ? "Draw (active)" : "Draw"}
+                  Box
+                </button>
+                <button
+                  onClick={() => setDrawMode(drawMode === "polygon" ? "none" : "polygon")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                    drawMode === "polygon"
+                      ? "bg-sky-500 text-ink"
+                      : "border border-edge text-slate-300 hover:border-sky-500/60"
+                  }`}
+                >
+                  Polygon
                 </button>
               </div>
             </div>
@@ -912,7 +953,12 @@ export default function App() {
                   <br />E {bbox[2].toFixed(4)} · N {bbox[3].toFixed(4)}
                 </div>
                 <div className="mt-1 text-[11px] text-slate-500">
-                  ≈ {areaKm2(bbox).toLocaleString(undefined, { maximumFractionDigits: 0 })} km²
+                  {geometry
+                    ? `polygon · ${geometry.coordinates[0].length - 1} vertices · `
+                    : "box · "}
+                  ≈{" "}
+                  {Math.round(geometry ? polygonAreaKm2(geometry) : areaKm2(bbox)).toLocaleString()}{" "}
+                  km²
                 </div>
               </>
             ) : (
@@ -920,9 +966,11 @@ export default function App() {
                 No AOI yet. Press Draw, then drag a box on the map.
               </p>
             )}
-            {drawMode && (
+            {drawMode !== "none" && (
               <p className="mt-2 text-[10px] text-sky-400">
-                Drag on the map to define the box. Panning is paused while drawing.
+                {drawMode === "rect"
+                  ? "Drag on the map to define the box. Panning is paused while drawing."
+                  : "Click each corner, then double-click the last point to close the shape (3+ points)."}
               </p>
             )}
           </div>
@@ -1432,9 +1480,10 @@ export default function App() {
         <main className="relative min-w-0 flex-1">
           <MapView
             bbox={bbox}
+            polygon={geometry}
             drawMode={drawMode}
-            onBbox={handleBbox}
-            onDrawEnd={() => setDrawMode(false)}
+            onAoi={handleAoi}
+            onDrawEnd={() => setDrawMode("none")}
           />
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3">

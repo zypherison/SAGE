@@ -1,5 +1,11 @@
 export type BBox = [number, number, number, number];
 
+/** A drawn AOI. Only the exterior ring is used by the services. */
+export interface PolygonGeometry {
+  type: "Polygon";
+  coordinates: number[][][];
+}
+
 export interface Scene {
   id: string;
   provider: string;

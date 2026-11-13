@@ -7,6 +7,7 @@ import type {
   Meta,
   Plan,
   Place,
+  PolygonGeometry,
   QueryResponse,
   ReplayResponse,
   SearchResponse,
@@ -100,10 +101,10 @@ export const api = {
       }),
     }),
 
-  index: (index: string, bbox: BBox) =>
+  index: (index: string, bbox: BBox, geometry?: PolygonGeometry | null) =>
     request<IndexResponse>("/api/index", {
       method: "POST",
-      body: JSON.stringify({ index, bbox }),
+      body: JSON.stringify({ index, bbox, geometry: geometry ?? null }),
     }),
 
   timeseries: (params: {
@@ -112,6 +113,7 @@ export const api = {
     date_from?: string | null;
     date_to?: string | null;
     max_points?: number;
+    geometry?: PolygonGeometry | null;
   }) =>
     request<TimeseriesResponse>("/api/timeseries", {
       method: "POST",
@@ -121,25 +123,54 @@ export const api = {
         date_from: params.date_from ?? null,
         date_to: params.date_to ?? null,
         max_points: params.max_points ?? 10,
+        geometry: params.geometry ?? null,
       }),
     }),
 
-  compare: (params: { bbox: BBox; index: string; date_a: string; date_b: string }) =>
+  compare: (params: {
+    bbox: BBox;
+    index: string;
+    date_a: string;
+    date_b: string;
+    geometry?: PolygonGeometry | null;
+  }) =>
     request<CompareResponse>("/api/compare", {
       method: "POST",
-      body: JSON.stringify(params),
+      body: JSON.stringify({ ...params, geometry: params.geometry ?? null }),
     }),
 
-  seasonal: (params: { bbox: BBox; index: string; month?: number; years?: number }) =>
+  seasonal: (params: {
+    bbox: BBox;
+    index: string;
+    month?: number;
+    years?: number;
+    geometry?: PolygonGeometry | null;
+  }) =>
     request<SeasonalResponse>("/api/seasonal", {
       method: "POST",
-      body: JSON.stringify({ bbox: params.bbox, index: params.index, month: params.month ?? null, years: params.years ?? null }),
+      body: JSON.stringify({
+        bbox: params.bbox,
+        index: params.index,
+        month: params.month ?? null,
+        years: params.years ?? null,
+        geometry: params.geometry ?? null,
+      }),
     }),
 
-  thermal: (params: { bbox: BBox; month?: number; years?: number }) =>
+  thermal: (params: {
+    bbox: BBox;
+    month?: number;
+    years?: number;
+    geometry?: PolygonGeometry | null;
+  }) =>
     request<ThermalResponse>("/api/thermal", {
       method: "POST",
-      body: JSON.stringify({ bbox: params.bbox, month: params.month ?? null, years: params.years ?? null }),
+      body: JSON.stringify({
+        bbox: params.bbox,
+        month: params.month ?? null,
+        years: params.years ?? null,
+        geometry: params.geometry ?? null,
+      }),
     }),
 
   /** A cached fixture, for demonstrating without network access. */

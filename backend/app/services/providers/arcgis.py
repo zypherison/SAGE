@@ -166,22 +166,33 @@ async def index_statistics(
     bbox: list[float],
     raster_function: str,
     objectid: str | None = None,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Mean/min/max/sd over the AOI using the service's own raster function.
 
     Pass `objectid` to pin one acquisition. Verified 2026-11-12: the endpoint
     honours `lockRasterIds`, so a per-date series is real acquisitions rather
     than the daily composite (composite 0.1297 vs per-date 0.0975/0.0248).
+
+    Pass `geometry` (GeoJSON Polygon) to have the service clip to the drawn
+    shape instead of its envelope. A rectangle is still the fallback, but the
+    envelope of a winding river includes land the user did not select, so the
+    polygon matters for the number, not only for the picture.
     """
-    geometry = str(
-        {
-            "xmin": bbox[0], "ymin": bbox[1], "xmax": bbox[2], "ymax": bbox[3],
-            "spatialReference": {"wkid": 4326},
-        }
-    )
+    if geometry is not None and geometry.get("type") in ("Polygon", "MultiPolygon"):
+        geometry_param = _geojson_to_esri_geometry(geometry)
+        geometry_type = "esriGeometryPolygon"
+    else:
+        geometry_param = str(
+            {
+                "xmin": bbox[0], "ymin": bbox[1], "xmax": bbox[2], "ymax": bbox[3],
+                "spatialReference": {"wkid": 4326},
+            }
+        )
+        geometry_type = "esriGeometryEnvelope"
     params = {
-        "geometry": geometry,
-        "geometryType": "esriGeometryEnvelope",
+        "geometry": geometry_param,
+        "geometryType": geometry_type,
         "inSR": "4326",
         "renderingRule": str({"rasterFunction": raster_function}),
         "f": "json",

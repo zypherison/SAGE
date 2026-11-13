@@ -27,7 +27,7 @@ from app import config
 from app.errors import INVALID_ARGUMENTS, NO_IMAGERY, AppError
 from app.services import areas, indices
 from app.services.download import acquisitions
-from app.services.geo import bbox_area_km2
+from app.services.geo import bbox_area_km2, geometry_area_km2
 from app.services.net import Fetch
 from app.services.providers import arcgis
 
@@ -51,6 +51,7 @@ async def build(
     date_to: str,
     max_points: int | None = None,
     max_cloud: float | None = 40.0,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spec = indices.definition(index)  # raises UNKNOWN_INDEX on a typo
     function = spec.get("arcgis_function")
@@ -79,17 +80,19 @@ async def build(
             "holds a rolling ~14-month window, so older ranges return nothing by design.",
         )
 
-    aoi_km2 = bbox_area_km2(bbox)
+    aoi_km2 = geometry_area_km2(geometry) if geometry is not None else bbox_area_km2(bbox)
     points: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for pick in picks:
         try:
-            stats = await arcgis.index_statistics(
-                fetch,
-                bbox=bbox,
-                raster_function=str(function),
-                objectid=pick.objectid,
-            )
+            kwargs: dict[str, Any] = {
+                "bbox": bbox,
+                "raster_function": str(function),
+                "objectid": pick.objectid,
+            }
+            if geometry is not None:
+                kwargs["geometry"] = geometry
+            stats = await arcgis.index_statistics(fetch, **kwargs)
         except AppError as exc:
             skipped.append({"date": pick.day, "objectid": pick.objectid,
                             "status": "error", "reason": str(exc)[:200]})

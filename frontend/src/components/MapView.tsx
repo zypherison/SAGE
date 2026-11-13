@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { BBox } from "../types";
+import type { BBox, PolygonGeometry } from "../types";
+
+export type DrawMode = "none" | "rect" | "polygon";
 
 interface Props {
   bbox: BBox | null;
-  drawMode: boolean;
-  onBbox: (bbox: BBox) => void;
+  polygon: PolygonGeometry | null;
+  drawMode: DrawMode;
+  onAoi: (bbox: BBox, polygon: PolygonGeometry | null) => void;
   onDrawEnd: () => void;
 }
 
 /**
  * Context basemaps. Both are keyless, openly licensed and need no account, so a
- * clone of this repo renders without any signup. The previous layer was CARTO's
- * `dark_all`, which is a proprietary raster style: free for non-commercial use
- * under their terms, but not open data, so it contradicted the project's own
- * "open sources only" claim.
+ * clone of this repo renders without any signup.
  */
 const BASEMAPS = [
   {
@@ -36,23 +36,49 @@ const BASEMAPS = [
   },
 ] as const;
 
+const ringToLatLngs = (ring: number[][]): L.LatLngExpression[] =>
+  ring.map(([lon, lat]) => [lat, lon] as [number, number]);
+
+const toLatLngs = (geom: PolygonGeometry): L.LatLngExpression[] =>
+  ringToLatLngs(geom.coordinates[0] ?? []);
+
+/** Close a vertex list into a GeoJSON exterior ring, rounded to ~0.1 m. */
+const toGeometry = (verts: L.LatLng[]): PolygonGeometry => {
+  const ring = verts.map((v) => [
+    Number(v.lng.toFixed(6)),
+    Number(v.lat.toFixed(6)),
+  ]);
+  ring.push(ring[0]);
+  return { type: "Polygon", coordinates: [ring] };
+};
+
 /**
- * Leaflet map with a plain drag-to-draw AOI. Implemented with native Leaflet
- * events instead of a draw plugin: one fewer dependency and no CSS to import.
+ * Leaflet map with two AOI tools: drag a rectangle, or click out a polygon and
+ * double-click to close it.
+ *
+ * The polygon is not decoration. A lake shore, a river reach or a ward boundary
+ * has a shape, and its envelope includes land the user did not select; the
+ * statistics service clips to the polygon when it is sent, so the numbers
+ * describe the drawn shape. Both tools still produce a bbox, because catalogues
+ * and imagery requests need one.
  */
-export default function MapView({ bbox, drawMode, onBbox, onDrawEnd }: Props) {
+export default function MapView({ bbox, polygon, drawMode, onAoi, onDrawEnd }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const rectRef = useRef<L.Rectangle | null>(null);
+  const aoiRef = useRef<L.LayerGroup | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
   const [basemap, setBasemap] = useState<string>(BASEMAPS[0].id);
   const dragRef = useRef<{ start: L.LatLng | null; preview: L.Rectangle | null }>({
     start: null,
     preview: null,
   });
+  const polyRef = useRef<{ verts: L.LatLng[]; line: L.Polyline | null }>({
+    verts: [],
+    line: null,
+  });
   // keep callbacks fresh without re-binding leaflet handlers
-  const cbRef = useRef({ onBbox, onDrawEnd });
-  cbRef.current = { onBbox, onDrawEnd };
+  const cbRef = useRef({ onAoi, onDrawEnd });
+  cbRef.current = { onAoi, onDrawEnd };
 
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -62,6 +88,7 @@ export default function MapView({ bbox, drawMode, onBbox, onDrawEnd }: Props) {
     return () => {
       map.remove();
       mapRef.current = null;
+      aoiRef.current = null;
     };
   }, []);
 
@@ -83,86 +110,171 @@ export default function MapView({ bbox, drawMode, onBbox, onDrawEnd }: Props) {
     const map = mapRef.current;
     if (!map) return;
 
-    if (!drawMode) {
+    const clearPolygon = () => {
+      polyRef.current.line?.remove();
+      polyRef.current.line = null;
+      polyRef.current.verts = [];
+    };
+
+    if (drawMode === "none") {
       map.dragging.enable();
+      map.doubleClickZoom.enable();
       map.getContainer().style.cursor = "";
+      clearPolygon();
       return;
     }
 
-    map.dragging.disable();
     map.getContainer().style.cursor = "crosshair";
 
-    const onDown = (e: L.LeafletMouseEvent) => {
-      dragRef.current.start = e.latlng;
-      dragRef.current.preview?.remove();
-      dragRef.current.preview = L.rectangle(L.latLngBounds(e.latlng, e.latlng), {
-        color: "#38bdf8",
-        weight: 2,
-        fillOpacity: 0.12,
-        dashArray: "4 3",
-      }).addTo(map);
+    if (drawMode === "rect") {
+      map.dragging.disable();
+
+      const onDown = (e: L.LeafletMouseEvent) => {
+        dragRef.current.start = e.latlng;
+        dragRef.current.preview?.remove();
+        dragRef.current.preview = L.rectangle(L.latLngBounds(e.latlng, e.latlng), {
+          color: "#38bdf8",
+          weight: 2,
+          fillOpacity: 0.12,
+          dashArray: "4 3",
+        }).addTo(map);
+      };
+
+      const onMove = (e: L.LeafletMouseEvent) => {
+        const { start, preview } = dragRef.current;
+        if (!start || !preview) return;
+        preview.setBounds(L.latLngBounds(start, e.latlng));
+      };
+
+      const onUp = (e: L.LeafletMouseEvent) => {
+        const start = dragRef.current.start;
+        dragRef.current.start = null;
+        dragRef.current.preview?.remove();
+        dragRef.current.preview = null;
+        if (!start) return;
+
+        const b = L.latLngBounds(start, e.latlng);
+        const width = b.getEast() - b.getWest();
+        const height = b.getNorth() - b.getSouth();
+        if (Math.abs(width) < 1e-4 || Math.abs(height) < 1e-4) return; // stray click
+
+        cbRef.current.onAoi([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], null);
+        cbRef.current.onDrawEnd();
+      };
+
+      map.on("mousedown", onDown);
+      map.on("mousemove", onMove);
+      map.on("mouseup", onUp);
+
+      return () => {
+        map.off("mousedown", onDown);
+        map.off("mousemove", onMove);
+        map.off("mouseup", onUp);
+        dragRef.current.preview?.remove();
+        dragRef.current.preview = null;
+        dragRef.current.start = null;
+        map.dragging.enable();
+        map.getContainer().style.cursor = "";
+      };
+    }
+
+    // polygon: click to add a vertex, move for a rubber band, double-click to close
+    map.dragging.disable();
+    map.doubleClickZoom.disable();
+
+    const redraw = (cursor: L.LatLng | null) => {
+      const pts: L.LatLngExpression[] = polyRef.current.verts.map((v) => [v.lat, v.lng]);
+      if (cursor && pts.length) pts.push([cursor.lat, cursor.lng]);
+      if (!polyRef.current.line) {
+        polyRef.current.line = L.polyline(pts, {
+          color: "#38bdf8",
+          weight: 2,
+          dashArray: "4 3",
+        }).addTo(map);
+      } else {
+        polyRef.current.line.setLatLngs(pts);
+      }
+    };
+
+    const onClick = (e: L.LeafletMouseEvent) => {
+      const verts = polyRef.current.verts;
+      const last = verts[verts.length - 1];
+      // A double-click fires two clicks; ignore the duplicate that lands on the
+      // same spot, otherwise every polygon gains a zero-length edge.
+      if (last && last.distanceTo(e.latlng) < 2) return;
+      verts.push(e.latlng);
+      redraw(null);
     };
 
     const onMove = (e: L.LeafletMouseEvent) => {
-      const { start, preview } = dragRef.current;
-      if (!start || !preview) return;
-      preview.setBounds(L.latLngBounds(start, e.latlng));
+      if (!polyRef.current.verts.length) return;
+      redraw(e.latlng);
     };
 
-    const onUp = (e: L.LeafletMouseEvent) => {
-      const start = dragRef.current.start;
-      dragRef.current.start = null;
-      dragRef.current.preview?.remove();
-      dragRef.current.preview = null;
-      if (!start) return;
-
-      const b = L.latLngBounds(start, e.latlng);
-      const width = b.getEast() - b.getWest();
-      const height = b.getNorth() - b.getSouth();
-      if (Math.abs(width) < 1e-4 || Math.abs(height) < 1e-4) return; // ignore stray clicks
-
-      cbRef.current.onBbox([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    const onFinish = () => {
+      const verts = polyRef.current.verts;
+      if (verts.length < 3) {
+        clearPolygon();
+        return;
+      }
+      const geom = toGeometry(verts);
+      const lats = verts.map((v) => v.lat);
+      const lngs = verts.map((v) => v.lng);
+      clearPolygon();
+      cbRef.current.onAoi(
+        [Math.min(...lngs), Math.min(...lats), Math.max(...lngs), Math.max(...lats)],
+        geom,
+      );
       cbRef.current.onDrawEnd();
     };
 
-    map.on("mousedown", onDown);
+    map.on("click", onClick);
     map.on("mousemove", onMove);
-    map.on("mouseup", onUp);
+    map.on("dblclick", onFinish);
 
     return () => {
-      map.off("mousedown", onDown);
+      map.off("click", onClick);
       map.off("mousemove", onMove);
-      map.off("mouseup", onUp);
+      map.off("dblclick", onFinish);
+      clearPolygon();
       map.dragging.enable();
+      map.doubleClickZoom.enable();
       map.getContainer().style.cursor = "";
     };
   }, [drawMode]);
 
-  // render the AOI
+  // render the AOI: the polygon when there is one, otherwise its envelope
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    if (!aoiRef.current) aoiRef.current = L.layerGroup().addTo(map);
+    const layer = aoiRef.current;
+    layer.clearLayers();
 
-    if (!bbox) {
-      rectRef.current?.remove();
-      rectRef.current = null;
-      return;
-    }
+    let bounds: L.LatLngBounds | null = null;
 
-    const bounds = L.latLngBounds([bbox[1], bbox[0]], [bbox[3], bbox[2]]);
-    if (!rectRef.current) {
-      rectRef.current = L.rectangle(bounds, {
+    if (polygon && (polygon.coordinates[0]?.length ?? 0) >= 4) {
+      const latlngs = toLatLngs(polygon);
+      L.polygon(latlngs, {
+        color: "#38bdf8",
+        weight: 2,
+        fillColor: "#38bdf8",
+        fillOpacity: 0.12,
+      }).addTo(layer);
+      bounds = L.latLngBounds(latlngs as [number, number][]);
+    } else if (bbox) {
+      const b = L.latLngBounds([bbox[1], bbox[0]], [bbox[3], bbox[2]]);
+      L.rectangle(b, {
         color: "#38bdf8",
         weight: 2,
         fillColor: "#38bdf8",
         fillOpacity: 0.08,
-      }).addTo(map);
-    } else {
-      rectRef.current.setBounds(bounds);
+      }).addTo(layer);
+      bounds = b;
     }
 
-    if (map.getSize().x > 0) map.fitBounds(bounds.pad(0.35), { maxZoom: 13 });
-  }, [bbox]);
+    if (bounds && map.getSize().x > 0) map.fitBounds(bounds.pad(0.35), { maxZoom: 13 });
+  }, [bbox, polygon]);
 
   return (
     <div className="relative h-full w-full">

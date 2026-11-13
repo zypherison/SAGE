@@ -28,7 +28,7 @@ from app import config
 from app.errors import AOI_TOO_LARGE, INVALID_ARGUMENTS, NO_IMAGERY, AppError
 from app.services import areas, indices
 from app.services.download import acquisitions
-from app.services.geo import bbox_area_km2, bbox_span_km
+from app.services.geo import bbox_area_km2, bbox_span_km, geometry_area_km2
 from app.services.net import Fetch
 from app.services.providers import arcgis
 
@@ -61,6 +61,7 @@ async def build(
     month: int | None = None,
     years: int | None = None,
     max_cloud: float | None = 40.0,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spec = indices.definition(index)  # raises UNKNOWN_INDEX on a typo
     function = spec.get("arcgis_function")
@@ -85,7 +86,7 @@ async def build(
             f"{config.MAX_STATS_SPAN_KM:,.0f} km per side.",
         )
 
-    aoi_km2 = bbox_area_km2(bbox)
+    aoi_km2 = geometry_area_km2(geometry) if geometry is not None else bbox_area_km2(bbox)
     series: list[dict[str, Any]] = []
     skipped_years: list[dict[str, Any]] = []
 
@@ -107,12 +108,14 @@ async def build(
         area_samples: list[dict[str, Any] | None] = []
         for pick in picks:
             try:
-                stats = await arcgis.index_statistics(
-                    fetch,
-                    bbox=bbox,
-                    raster_function=str(function),
-                    objectid=pick.objectid,
-                )
+                stats_kwargs: dict[str, Any] = {
+                    "bbox": bbox,
+                    "raster_function": str(function),
+                    "objectid": pick.objectid,
+                }
+                if geometry is not None:
+                    stats_kwargs["geometry"] = geometry
+                stats = await arcgis.index_statistics(fetch, **stats_kwargs)
             except AppError:
                 continue
             if not stats or not stats.get("count"):

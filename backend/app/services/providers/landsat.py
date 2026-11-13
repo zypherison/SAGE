@@ -101,19 +101,35 @@ async def band_statistics(
     bbox: list[float],
     band_index: int = config.LANDSAT_THERMAL_BAND,
     objectid: Any = None,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Statistics and histogram for one band of one pinned scene."""
+    """Statistics and histogram for one band of one pinned scene.
+
+    `geometry` (GeoJSON Polygon) clips the statistics to the drawn shape; without
+    it the envelope of the bbox is used, which includes land outside a
+    non-rectangular AOI.
+    """
     import json
 
-    geometry = str(
-        {
-            "xmin": bbox[0], "ymin": bbox[1], "xmax": bbox[2], "ymax": bbox[3],
-            "spatialReference": {"wkid": 4326},
-        }
-    )
+    if geometry is not None and geometry.get("type") in ("Polygon", "MultiPolygon"):
+        coords = geometry.get("coordinates") or []
+        if geometry["type"] == "MultiPolygon":
+            rings = [[[float(x), float(y)] for x, y in ring] for poly in coords for ring in poly]
+        else:
+            rings = [[[float(x), float(y)] for x, y in ring] for ring in coords]
+        geometry_param = str({"rings": rings, "spatialReference": {"wkid": 4326}})
+        geometry_type = "esriGeometryPolygon"
+    else:
+        geometry_param = str(
+            {
+                "xmin": bbox[0], "ymin": bbox[1], "xmax": bbox[2], "ymax": bbox[3],
+                "spatialReference": {"wkid": 4326},
+            }
+        )
+        geometry_type = "esriGeometryEnvelope"
     params: dict[str, Any] = {
-        "geometry": geometry,
-        "geometryType": "esriGeometryEnvelope",
+        "geometry": geometry_param,
+        "geometryType": geometry_type,
         "inSR": "4326",
         "f": "json",
     }

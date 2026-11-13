@@ -13,7 +13,7 @@ from __future__ import annotations
 from app import config
 from app.errors import AOI_TOO_LARGE, UNKNOWN_INDEX, AppError
 from app.services import areas
-from app.services.geo import bbox_area_km2, bbox_span_km, validate_bbox
+from app.services.geo import bbox_area_km2, bbox_span_km, geometry_area_km2, validate_bbox
 from app.services.net import Fetch
 from app.services.providers import arcgis
 
@@ -31,7 +31,9 @@ def definition(index: str) -> dict:
     return config.INDEX_DEFS[key]
 
 
-async def compute(fetch: Fetch, *, index: str, bbox: list[float]) -> dict:
+async def compute(
+    fetch: Fetch, *, index: str, bbox: list[float], geometry: dict | None = None
+) -> dict:
     """Return a normalized result dict; never raises for data-quality issues."""
     # An unknown index is a bad request, not a data condition. Letting the coded
     # UNKNOWN_INDEX error propagate keeps the vocabulary honest: previously this
@@ -54,7 +56,9 @@ async def compute(fetch: Fetch, *, index: str, bbox: list[float]) -> dict:
             "visual_png_url": None,
         }
 
-    area = bbox_area_km2(bbox)
+    # The drawn polygon's own area, so a winding AOI is not charged for the
+    # corners of its envelope. Falls back to the bbox area for a rectangle.
+    area = geometry_area_km2(geometry) if geometry is not None else bbox_area_km2(bbox)
     span = bbox_span_km(bbox)
 
     # Span, not area. The service renders at native 10 m, so a 45x5 km strip is
@@ -89,7 +93,10 @@ async def compute(fetch: Fetch, *, index: str, bbox: list[float]) -> dict:
         }
 
     try:
-        raw = await arcgis.index_statistics(fetch, bbox=bbox, raster_function=str(function))
+        kwargs: dict = {"bbox": bbox, "raster_function": str(function)}
+        if geometry is not None:
+            kwargs["geometry"] = geometry
+        raw = await arcgis.index_statistics(fetch, **kwargs)
     except Exception as exc:
         detail = str(exc)
         # The provider states this in an `error` object with HTTP 200, so it is

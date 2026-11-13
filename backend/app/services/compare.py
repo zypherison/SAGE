@@ -20,7 +20,7 @@ from app import config
 from app.errors import INVALID_ARGUMENTS, NO_IMAGERY, AppError
 from app.services import areas, indices
 from app.services.download import export_size
-from app.services.geo import bbox_area_km2
+from app.services.geo import bbox_area_km2, geometry_area_km2
 from app.services.net import Fetch
 from app.services.providers import arcgis
 
@@ -87,17 +87,20 @@ async def _one(
     rendering: str | None,
     size: tuple[int, int],
     window_days: int,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     pick, actual_day = await _nearest(
         fetch, bbox=bbox, day=day, max_cloud=max_cloud, window_days=window_days
     )
 
-    stats = await arcgis.index_statistics(
-        fetch,
-        bbox=bbox,
-        raster_function=str(spec["arcgis_function"]),
-        objectid=pick.id,
-    )
+    stats_kwargs: dict[str, Any] = {
+        "bbox": bbox,
+        "raster_function": str(spec["arcgis_function"]),
+        "objectid": pick.id,
+    }
+    if geometry is not None:
+        stats_kwargs["geometry"] = geometry
+    stats = await arcgis.index_statistics(fetch, **stats_kwargs)
     if not stats or not stats.get("count"):
         raise AppError(NO_IMAGERY, f"The acquisition on {actual_day} has no valid pixels over this AOI.")
 
@@ -115,7 +118,11 @@ async def _one(
         "min": value("min"),
         "max": value("max"),
         "count": int(stats.get("count") or 0),
-        "areas": areas.estimate(index, stats.get("histogram"), bbox_area_km2(bbox)),
+        "areas": areas.estimate(
+            index,
+            stats.get("histogram"),
+            geometry_area_km2(geometry) if geometry is not None else bbox_area_km2(bbox),
+        ),
         "image_url": arcgis.scene_url(
             bbox, objectid=pick.id, rendering_rule=rendering, size=size
         ),
@@ -132,6 +139,7 @@ async def build(
     date_a: str,
     date_b: str,
     max_cloud: float | None = 40.0,
+    geometry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not date_a or not date_b:
         raise AppError(INVALID_ARGUMENTS, "Both dates are required.")
@@ -151,12 +159,12 @@ async def build(
     before = await _one(
         fetch, bbox=bbox, spec=spec, index=key, day=date_a,
         max_cloud=max_cloud, rendering=rendering, size=size,
-        window_days=config.COMPARE_WINDOW_DAYS,
+        window_days=config.COMPARE_WINDOW_DAYS, geometry=geometry,
     )
     after = await _one(
         fetch, bbox=bbox, spec=spec, index=key, day=date_b,
         max_cloud=max_cloud, rendering=rendering, size=size,
-        window_days=config.COMPARE_WINDOW_DAYS,
+        window_days=config.COMPARE_WINDOW_DAYS, geometry=geometry,
     )
 
     delta = None

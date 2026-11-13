@@ -62,7 +62,13 @@ from app.services import (
     thermal,
     timeseries,
 )
-from app.services.geo import bbox_area_km2, bbox_span_km, geometry_bbox, validate_bbox
+from app.services.geo import (
+    bbox_area_km2,
+    bbox_span_km,
+    geometry_bbox,
+    normalize_aoi,
+    validate_bbox,
+)
 from app.services.net import Fetch
 from app.services.query_parser import parse
 
@@ -99,6 +105,26 @@ def _citation(accessed: datetime) -> str:
         f"mosaic; accessed {accessed.date().isoformat()}. "
         "Contains modified Copernicus Sentinel data, processed by Esri."
     )
+
+
+def _resolve_aoi(
+    bbox: list[float] | None, geometry: dict[str, Any] | None
+) -> tuple[list[float], dict[str, Any] | None]:
+    """Return (bbox, simplified polygon).
+
+    The bbox still drives the request envelope, imagery and catalogues; the
+    polygon is what the statistics service clips to. Both are returned so an
+    endpoint can pass the shape through instead of silently squaring it off.
+    """
+    try:
+        if geometry is not None:
+            bb, geom, _area, _centre = normalize_aoi(geometry=geometry)
+            return bb, geom
+        if bbox:
+            return validate_bbox(bbox), None
+    except ValueError as exc:
+        raise AppError(INVALID_ARGUMENTS, str(exc)) from exc
+    raise AppError(INVALID_ARGUMENTS, "Provide bbox or geometry")
 
 
 def _resolve_bbox(bbox: list[float] | None, geometry: dict[str, Any] | None) -> list[float]:
@@ -351,13 +377,19 @@ async def search_endpoint(req: SearchRequest) -> SearchResponse:
 # --------------------------------------------------------------------------
 @app.post("/api/index", response_model=IndexResponse)
 async def index_endpoint(req: IndexRequest) -> IndexResponse:
-    bbox = _resolve_bbox(req.bbox, req.geometry)
+    bbox, geometry = _resolve_aoi(req.bbox, req.geometry)
 
     async with connection() as fetch:
-        result = await indices.compute(fetch, index=req.index, bbox=bbox)
+        result = await indices.compute(
+            fetch, index=req.index, bbox=bbox, geometry=geometry
+        )
         cache = fetch.stats.as_dict()
 
-    payload = {"index": req.index.lower(), "bbox": [round(v, 6) for v in bbox]}
+    payload = {
+        "index": req.index.lower(),
+        "bbox": [round(v, 6) for v in bbox],
+        "geometry": geometry,
+    }
     if result.get("status") == "ok":
         result["evidence_id"] = evidence.store(
             payload,
@@ -383,7 +415,7 @@ async def index_endpoint(req: IndexRequest) -> IndexResponse:
 @app.post("/api/timeseries")
 async def timeseries_endpoint(req: TimeseriesRequest) -> dict[str, Any]:
     """One index value per acquisition day, for the trend line and its CSV."""
-    bbox = _resolve_bbox(req.bbox, req.geometry)
+    bbox, geometry = _resolve_aoi(req.bbox, req.geometry)
 
     today = datetime.now(timezone.utc).date()
     date_to = req.date_to or today.isoformat()
@@ -400,13 +432,14 @@ async def timeseries_endpoint(req: TimeseriesRequest) -> dict[str, Any]:
             date_to=date_to,
             max_points=req.max_points,
             max_cloud=req.max_cloud,
+            geometry=geometry,
         )
 
 
 @app.post("/api/compare")
 async def compare_endpoint(req: CompareRequest) -> dict[str, Any]:
     """Two dates, two pinned acquisitions, one difference."""
-    bbox = _resolve_bbox(req.bbox, req.geometry)
+    bbox, geometry = _resolve_aoi(req.bbox, req.geometry)
     async with connection() as fetch:
         result = await compare.build(
             fetch,
@@ -415,6 +448,7 @@ async def compare_endpoint(req: CompareRequest) -> dict[str, Any]:
             date_a=req.date_a,
             date_b=req.date_b,
             max_cloud=req.max_cloud,
+            geometry=geometry,
         )
     accessed = datetime.now(timezone.utc)
     result["generated_at"] = accessed.isoformat()
@@ -425,7 +459,7 @@ async def compare_endpoint(req: CompareRequest) -> dict[str, Any]:
 @app.post("/api/seasonal")
 async def seasonal_endpoint(req: SeasonalRequest) -> dict[str, Any]:
     """One calendar month across years, so the season is held constant."""
-    bbox = _resolve_bbox(req.bbox, req.geometry)
+    bbox, geometry = _resolve_aoi(req.bbox, req.geometry)
     async with connection() as fetch:
         result = await seasons.build(
             fetch,
@@ -434,6 +468,7 @@ async def seasonal_endpoint(req: SeasonalRequest) -> dict[str, Any]:
             month=req.month,
             years=req.years,
             max_cloud=req.max_cloud,
+            geometry=geometry,
         )
     accessed = datetime.now(timezone.utc)
     result["generated_at"] = accessed.isoformat()
@@ -444,7 +479,7 @@ async def seasonal_endpoint(req: SeasonalRequest) -> dict[str, Any]:
 @app.post("/api/thermal")
 async def thermal_endpoint(req: ThermalRequest) -> dict[str, Any]:
     """Landsat 8/9 brightness temperature for the same month across years."""
-    bbox = _resolve_bbox(req.bbox, req.geometry)
+    bbox, geometry = _resolve_aoi(req.bbox, req.geometry)
     async with connection() as fetch:
         result = await thermal.build(
             fetch,
@@ -452,6 +487,7 @@ async def thermal_endpoint(req: ThermalRequest) -> dict[str, Any]:
             month=req.month,
             years=req.years,
             max_scenes=req.max_scenes,
+            geometry=geometry,
         )
     accessed = datetime.now(timezone.utc)
     result["generated_at"] = accessed.isoformat()
@@ -607,7 +643,10 @@ async def replay_endpoint(evidence_id: str) -> dict[str, Any]:
     payload = record.get("payload") or {}
     async with connection() as fetch:
         fresh = await indices.compute(
-            fetch, index=payload.get("index", "ndvi"), bbox=payload["bbox"]
+            fetch,
+            index=payload.get("index", "ndvi"),
+            bbox=payload["bbox"],
+            geometry=payload.get("geometry"),
         )
         cache = fetch.stats.as_dict()
 
