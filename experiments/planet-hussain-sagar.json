@@ -1,0 +1,37 @@
+[
+  {
+    "id": "20251128_054755_88_2538",
+    "item_type": "PSScene",
+    "acquired": "2025-11-28",
+    "cloud_cover": 0,
+    "thumbnail": "https://tiles.planet.com/data/v1/item-types/PSScene/items/20251128_054755_88_2538/thumb"
+  },
+  {
+    "id": "20251126_060849_34_24b7",
+    "item_type": "PSScene",
+    "acquired": "2025-11-26",
+    "cloud_cover": 0,
+    "thumbnail": "https://tiles.planet.com/data/v1/item-types/PSScene/items/20251126_060849_34_24b7/thumb"
+  },
+  {
+    "id": "20251120_054645_13_250d",
+    "item_type": "PSScene",
+    "acquired": "2025-11-20",
+    "cloud_cover": 0,
+    "thumbnail": "https://tiles.planet.com/data/v1/item-types/PSScene/items/20251120_054645_13_250d/thumb"
+  },
+  {
+    "id": "20251120_054647_28_250d",
+    "item_type": "PSScene",
+    "acquired": "2025-11-20",
+    "cloud_cover": 0,
+    "thumbnail": "https://tiles.planet.com/data/v1/item-types/PSScene/items/20251120_054647_28_250d/thumb"
+  },
+  {
+    "id": "20251119_054744_46_2535",
+    "item_type": "PSScene",
+    "acquired": "2025-11-19",
+    "cloud_cover": 0,
+    "thumbnail": "https://tiles.planet.com/data/v1/item-types/PSScene/items/20251119_054744_46_2535/thumb"
+  }
+]

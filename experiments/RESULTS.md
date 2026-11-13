@@ -11,6 +11,9 @@ Two questions were open after the review:
 2. Is Sentinel Hub's Statistical API (#15) actually usable, and does it fix the two
    limits SAGE states openly — the short archive window and scene-level cloud masking?
 
+A third lead was added later, when a Planet API key became available: can a
+commercial key give SAGE pixels its keyless providers cannot? That is section 3.
+
 ## 1. Link re-probe
 
 `probe_links.py` re-requests every distinct URL from the table (20 after dropping the
@@ -79,11 +82,39 @@ and compare the rows with the Hussain Sagar figures in the seminar document. Pas
 `--geometry <file.geojson>` sends the polygon instead of the bbox, matching the new
 polygon AOI behaviour on `main`.
 
+## 3. Planet Data API
+
+Planet is not in `new-resources.md`; it was tested because a key was supplied. The
+question was narrow: does that key reach pixels the app can compare with its open
+ArcGIS numbers? `planet.py` answers it against the same Hussain Sagar AOI.
+
+Measured on 2026-11-13:
+
+| Probe | Result |
+|---|---|
+| Root endpoints | `GET /data/v1/`, `/item-types`; `POST /quick-search`, `/stats` all **200** — the key authenticates |
+| Item types visible | 9: `PSScene`, `PelicanScene`, `REOrthoTile`, `REScene`, `SkySatCollect`, `SkySatScene`, `SkySatVideo`, `TanagerMethane`, `TanagerScene`. **No Sentinel-2 or Landsat**: asking for `Sentinel2L2A` or `Landsat8L1G` returns `400 "Not all item types requested exist or are accessible"` |
+| PlanetScope coverage, Oct–Nov 2025 | **93 scenes** over Hussain Sagar (50 in October, 43 in November); several at **0 % cloud** |
+| Archive depth | A window in **2016**, **2019** and **2023** each returns an item, so it reaches well past the ~14-month ArcGIS window |
+| Pixel access | `_permissions: []`; the item's assets endpoint returns `{"assets": {}}`, and asset activation returns 404. **No analytic download** |
+| Preview | The item thumbnail link (`tiles.planet.com/.../thumb`) returns **200, 62,408 bytes** — metadata and preview only |
+| Basemaps | `200` with an empty `mosaics` list; `my/subscriptions` returns **403** |
+
+So the key is a **search and metadata** key, not an imagery key. It is genuinely
+useful for discovery — 93 PlanetScope scenes in two months, with cloud cover, over an
+AOI where the free catalogues are thin — but it cannot produce NDVI, so it cannot be
+compared with SAGE's current statistics. Reaching pixels would need an entitlement to
+the `ortho_analytic_4b`/`_sr` assets, i.e. a paid Planet subscription; nothing in the
+API can grant that from here. Separately, PlanetScope is ~3 m in four bands, so even
+with access it is a different basis from Sentinel-2's 10 m, not a drop-in replacement.
+
 ## Reproduce
 
 ```bash
 python experiments/probe_links.py                    # ~20 requests, 1 s apart
 python experiments/sentinelhub.py --dry-run          # no network
 python experiments/sentinelhub.py --probe            # one request, expect 401
-python -m pytest experiments -q                      # offline, 5 tests
+PLANET_API_KEY=... python experiments/planet.py --stats   # monthly scene counts
+PLANET_API_KEY=... python experiments/planet.py --assets PSScene/<item-id>
+python -m pytest experiments -q                      # offline, 10 tests
 ```
