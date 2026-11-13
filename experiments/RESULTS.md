@@ -59,7 +59,7 @@ JWT** directly. Measured on 2026-11-13, `Authorization: Bearer <planet-jwt>` ret
 `200` from both `/api/v1/statistics` and `/api/v1/process`; no OAuth exchange is
 needed. The script takes it as `SENTINELHUB_TOKEN` and skips the token request.
 
-That also settles the earlier UUID: `5f3a0e44-…` is the **Planet project/account**
+That also settles the earlier UUID: it is the **Planet project/account**
 id (the token's `pl_project` claim), not a Sentinel Hub OAuth client, which is why
 it returned `401 invalid_client`. The OAuth client-ID pair still works for accounts
 that have one, but it is no longer the only route. Planet tokens expire after about
