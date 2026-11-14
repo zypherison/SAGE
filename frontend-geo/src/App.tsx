@@ -1,8 +1,20 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import MapCanvas, { type DrawMode } from "./MapCanvas";
 import {
+  acquisitionDates,
   aoiMetrics,
   exportMap,
+  getBuildings,
   getCapabilities,
   runFeatures,
   runIndex,
@@ -12,7 +24,9 @@ import {
 } from "./api";
 import { HELP_TEXT, SUGGESTIONS, parseCommand } from "./assistant";
 import type {
+  AcquisitionDates,
   AoiMetrics,
+  BuildingLayer,
   Capabilities,
   FeatureLayer,
   IndexResult,
@@ -37,6 +51,48 @@ import {
 
 // Split out: MapLibre is only paid for when someone opens the 3D view.
 const TerrainView = lazy(() => import("./TerrainView"));
+
+/**
+ * The 3D view is the one part of this page that can fail at runtime (no WebGL,
+ * driver reset, MapLibre init error). Without this boundary such a failure
+ * unmounts the React root and leaves a white page.
+ */
+class TerrainBoundary extends Component<{ onReset: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("3D view failed", error);
+  }
+
+  private reset = () => {
+    this.setState({ failed: false });
+    this.props.onReset();
+  };
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="terrain-fallback" role="alert">
+          <div className="terrain-fallback-card">
+            <h3>3D view unavailable</h3>
+            <p>
+              The 3D renderer stopped, so the map has been returned to 2D. Nothing else is
+              affected.
+            </p>
+            <button type="button" className="btn" onClick={this.reset}>
+              Back to the 2D map
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const INDEXES = [
   { id: "ndvi", label: "NDVI", description: "Vegetation" },
@@ -68,6 +124,9 @@ export default function App() {
   const [population, setPopulation] = useState<PopulationResult | null>(null);
   const [landcover, setLandcover] = useState<LandcoverResult | null>(null);
   const [overlay, setOverlay] = useState<LandcoverOverlay | null>(null);
+  const [buildings, setBuildings] = useState<BuildingLayer | null>(null);
+  const [dates, setDates] = useState<AcquisitionDates | null>(null);
+  const [datesLoading, setDatesLoading] = useState(false);
   const [showLandcover, setShowLandcover] = useState(true);
   const [showBuildings, setShowBuildings] = useState(true);
   const [featureLayers, setFeatureLayers] = useState<FeatureLayer[]>([]);
@@ -111,6 +170,7 @@ export default function App() {
     // The class, building and OSM layers belong to the area they were computed for.
     setOverlay(null);
     setLandcover(null);
+    setBuildings(null);
     setFeatureLayers([]);
     setHiddenFeatures({});
     let cancelled = false;
@@ -194,6 +254,7 @@ export default function App() {
       try {
         const layer = await runLandcoverOverlay(geometry, dateFrom, dateTo);
         setOverlay(layer);
+        if (layer.buildings) setBuildings(layer.buildings);
         setShowLandcover(true);
         setShowBuildings(true);
       } catch {
@@ -212,6 +273,44 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages, chatBusy]);
+
+  // Which passes actually covered this area — the honest source for a date picker.
+  useEffect(() => {
+    if (!geometry) {
+      setDates(null);
+      return;
+    }
+    let cancelled = false;
+    setDatesLoading(true);
+    acquisitionDates(geometry, dateFrom, dateTo, maxCloud)
+      .then((result) => {
+        if (!cancelled) setDates(result);
+      })
+      .catch(() => {
+        if (!cancelled) setDates(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDatesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [geometry, dateFrom, dateTo, maxCloud]);
+
+  // Buildings with modelled heights are only needed for the 3D view; fetch them
+  // when 3D is opened rather than making every classification pay for it.
+  useEffect(() => {
+    if (!view3d || !geometry || (buildings?.heights && buildings.features.length > 0)) return;
+    let cancelled = false;
+    getBuildings(geometry, true)
+      .then((result) => {
+        if (!cancelled) setBuildings(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [view3d, geometry, buildings]);
 
   const pushMessage = (role: ChatMessage["role"], text: string) =>
     setMessages((current) => [...current, { role, text }]);
@@ -259,25 +358,33 @@ export default function App() {
       }
       if (intent.kind === "buildings") {
         const layer = await ensureOverlay();
-        const buildings = layer.buildings;
-        if (!buildings || buildings.returned === 0) {
+        if (layer.buildings) setBuildings(layer.buildings);
+        const current = layer.buildings;
+        if (!current || current.returned === 0) {
           pushMessage("agent", "No building footprints came back for this area.");
           return;
         }
         setShowBuildings(true);
-        const total = buildings.total === null ? "" : ` of ${buildings.total.toLocaleString("en-IN")}`;
-        const truncated = buildings.truncated ? ` Showing the first ${buildings.returned.toLocaleString("en-IN")}.` : "";
+        const total = current.total === null ? "" : ` of ${current.total.toLocaleString("en-IN")}`;
+        const truncated = current.truncated ? ` Showing the first ${current.returned.toLocaleString("en-IN")}.` : "";
         pushMessage(
           "agent",
-          `Marked ${buildings.returned.toLocaleString("en-IN")} building footprints${total} ` +
-            `(Open Buildings v3, confidence ≥ ${buildings.confidence ?? 0.7}).${truncated}`,
+          `Marked ${current.returned.toLocaleString("en-IN")} building footprints${total} ` +
+            `(Open Buildings v3, confidence ≥ ${current.confidence ?? 0.7}).${truncated}`,
         );
         return;
       }
       if (intent.kind === "landcover") {
         const result = landcover ?? (await runLandcover(geometry, dateFrom, dateTo));
         if (!landcover) setLandcover(result);
-        await ensureOverlay();
+        if (intent.focus !== null) {
+          const focused = await runLandcoverOverlay(geometry, dateFrom, dateTo, intent.focus);
+          setOverlay(focused);
+          if (focused.buildings) setBuildings(focused.buildings);
+        } else {
+          const layer = await ensureOverlay();
+          if (layer.buildings) setBuildings(layer.buildings);
+        }
         setShowLandcover(true);
         if (intent.focus === null) {
           const top = [...result.classes].sort((a, b) => b.percent - a.percent).slice(0, 3);
@@ -420,16 +527,23 @@ export default function App() {
             landcover={
               overlay ? { url: overlay.image_url, bounds: overlay.bounds } : null
             }
-            buildings={overlay?.buildings ?? null}
+            buildings={buildings}
             showLandcover={showLandcover}
             showBuildings={showBuildings}
           />
 
           {view3d && (
             <div className="terrain-pane">
-              <Suspense fallback={<div className="terrain-loading">Loading 3D terrain…</div>}>
-                <TerrainView geometry={geometry} />
-              </Suspense>
+              <TerrainBoundary onReset={() => setView3d(false)}>
+                <Suspense fallback={<div className="terrain-loading">Loading 3D terrain…</div>}>
+                  <TerrainView
+                    geometry={geometry}
+                    buildings={buildings}
+                    showBuildings={showBuildings}
+                    onExit={() => setView3d(false)}
+                  />
+                </Suspense>
+              </TerrainBoundary>
             </div>
           )}
 
@@ -502,7 +616,7 @@ export default function App() {
               <span className="layer-count">
                 {1 +
                   Number(Boolean(overlay)) +
-                  Number(Boolean(overlay?.buildings)) +
+                  Number(Boolean(buildings)) +
                   featureLayers.length}
               </span>
             </header>
@@ -577,16 +691,16 @@ export default function App() {
                   </li>
                 );
               })}
-              {overlay?.buildings && overlay.buildings.returned > 0 && (
+              {buildings && buildings.returned > 0 && (
                 <li className={showBuildings ? "" : "is-empty"}>
                   <i className="dot" style={{ background: "#c4281b" }} />
                   <div>
                     <strong>Buildings</strong>
                     <span>
-                      {overlay.buildings.returned.toLocaleString("en-IN")}
-                      {overlay.buildings.total !== null &&
-                        ` of ${overlay.buildings.total.toLocaleString("en-IN")}`}
-                      {overlay.buildings.truncated ? " drawn" : " footprints"}
+                      {buildings.returned.toLocaleString("en-IN")}
+                      {buildings.total !== null && ` of ${buildings.total.toLocaleString("en-IN")}`}
+                      {buildings.truncated ? " drawn" : " footprints"}
+                      {buildings.heights ? " · heights" : ""}
                     </span>
                   </div>
                   <button
@@ -601,7 +715,7 @@ export default function App() {
             </ul>
             <p className="layer-hint">
               {view3d
-                ? "3D terrain: drag to orbit, right-drag to pan. Drawing needs the 2D view."
+                ? "3D terrain: drag to orbit, right-drag to pan. Buildings are extruded at their modelled heights; drawing needs the 2D view."
                 : mode === "polygon"
                   ? "Click each corner, then double-click to close. Esc cancels."
                   : mode === "rect"
@@ -776,6 +890,52 @@ export default function App() {
                         onChange={(event) => setDateTo(event.target.value)}
                       />
                     </label>
+                  </div>
+
+                  <div className="date-strip">
+                    <div className="field-label">
+                      <span>Actual passes over this area</span>
+                      <strong>
+                        {datesLoading ? "checking…" : dates ? `${dates.days.length} days` : "—"}
+                      </strong>
+                    </div>
+                    {dates && dates.days.length > 0 ? (
+                      <div className="date-chips">
+                        {dates.days.map((day) => {
+                          const active = dateFrom === day.date && dateTo === day.date;
+                          const label = new Date(`${day.date}T00:00:00Z`).toLocaleDateString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                            timeZone: "UTC",
+                          });
+                          return (
+                            <button
+                              key={day.date}
+                              type="button"
+                              className={active ? "date-chip is-active" : "date-chip"}
+                              title={day.scenes
+                                .map((scene) =>
+                                  `${scene.datetime.slice(11, 19)}Z · ${scene.cloud ?? "?"}% cloud`,
+                                )
+                                .join("\n")}
+                              onClick={() => {
+                                setDateFrom(day.date);
+                                setDateTo(day.date);
+                              }}
+                            >
+                              {label}
+                              {day.cloud_min !== null && <em>{day.cloud_min.toFixed(0)}%</em>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="field-note">
+                        {datesLoading
+                          ? "Checking STAC for passes…"
+                          : "No scene covers this area in the window; widen the dates or raise the cloud limit."}
+                      </p>
+                    )}
                   </div>
 
                   <div className="field">

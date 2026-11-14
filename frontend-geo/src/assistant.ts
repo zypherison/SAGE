@@ -26,7 +26,8 @@ export const SUGGESTIONS = [
   "Mark all buildings",
   "Mark all roads",
   "Mark all monuments",
-  "Show water and trees",
+  "Mark all trees",
+  "Mark water",
   "Run NDVI",
   "How many people live here?",
 ];

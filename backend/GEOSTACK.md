@@ -50,7 +50,9 @@ problem (an installable desktop GIS) and would be scope without purpose here.
 | POST | `/api/geo/population` | WorldPop population inside the AOI, with the raster's provenance |
 | POST | `/api/geo/composite` | Earth Engine median composite over a window (503 until configured) |
 | POST | `/api/geo/landcover` | Dynamic World class areas, plus an Open Buildings structure count |
-| POST | `/api/geo/landcover/overlay` | palette class PNG + simplified Open Buildings GeoJSON for drawing on the map |
+| POST | `/api/geo/landcover/overlay` | palette class PNG (`focus` for one class) + simplified Open Buildings GeoJSON |
+| POST | `/api/geo/buildings` | Open Buildings footprints, optionally with modelled heights for extrusion |
+| POST | `/api/geo/dates` | actual Sentinel-2 passes over the AOI, grouped by day |
 | POST | `/api/geo/features` | OSM roads or monuments as GeoJSON, via Overpass |
 | POST | `/api/geo/map` | writes an interactive geemap HTML map, optionally with EE and land-cover layers |
 | GET | `/api/geo/map/{id}` | serves that map |
@@ -260,17 +262,38 @@ The `monuments` category is really *monuments and landmarks* — it includes
 
 ### 3D
 
-MapLibre renders satellite over Terrarium terrain, framed to the drawn AOI with
-orbit and pitch. The land-cover PNG is deliberately **not** draped: an image source
-with terrain enabled draws as a flat quad, most of it occluded by relief, which read
-as a grey wash over the selected area (measured, then removed). 3D keeps imagery,
-relief and the AOI outline; the class map is a 2D layer.
+MapLibre renders satellite over Terrarium terrain, framed to the drawn AOI, then
+steps one zoom closer so the view is about structure rather than a tilted map. The
+land-cover PNG is deliberately **not** draped: an image source with terrain enabled
+draws as a flat quad, most of it occluded by relief, which read as a grey wash over
+the selected area (measured, then removed).
+
+Buildings are extruded with `fill-extrusion` at heights from Open Buildings 2.5D
+Temporal (latest available year, 4 m, modelled — not surveyed). `/api/geo/buildings`
+returned 3,000 of 5,522 footprints in 37 s with heights: minimum 0 m, median 8.4 m,
+maximum 69 m, 39 without an estimate. Heights load only when 3D is opened.
+
+WebGL is not guaranteed: MapLibre throws on construction without it, and that error
+used to escape through Suspense and unmount the whole app — a white page after
+pressing 3D. TerrainView now probes for a WebGL context, catches constructor errors,
+and a React error boundary wraps it, so a failure shows an explanation and returns
+to 2D instead of blanking the page.
+
+### Acquisition dates
+
+`/api/geo/dates` lists the passes that actually cover the AOI, grouped by day with
+scene times and minimum cloud. Measured 2026-11-14 over the Hussain Sagar box for
+2026-10-20 → 2026-11-13: 13 Nov (2 scenes, 9.07% cloud) and 8 Nov (2 scenes, 3.99%).
+The workbench renders these as clickable chips that set the date window to that day
+— the picker reflects the archive instead of asking the user to guess.
 
 ### Chat box
 
 The **Ask** tab parses plain commands deterministically (`frontend-geo/src/assistant.ts`)
 and routes them to the endpoints above: buildings, roads, monuments, water, trees,
-built-up, crops, land cover, any of the five indices, or population. It is not a
+built-up, crops, land cover, any of the five indices, or population. A class ask
+(trees, water, built-up) fetches a **focused** overlay so only that class is drawn
+and the rest of the imagery stays visible. It is not a
 language model, so an unrecognised sentence returns the capability list instead of an
 invented action, and every reply is the number the API measured. Multiple OSM layers
 coexist and each has its own show/hide in the layer panel.

@@ -151,15 +151,8 @@ export interface LandcoverOverlay {
   scene_count: number;
   classes: { id: number; name: string; color: string }[];
   elapsed_seconds: number;
-  buildings?: {
-    type: "FeatureCollection";
-    features: unknown[];
-    total: number | null;
-    returned: number;
-    truncated: boolean;
-    confidence?: number;
-    error?: string;
-  };
+  focus: number | null;
+  buildings?: BuildingLayer;
 }
 
 export interface FeatureLayer {
@@ -172,6 +165,31 @@ export interface FeatureLayer {
   limit: number;
   source: string;
   licence: string;
+  note: string;
+}
+
+export interface BuildingLayer {
+  type: "FeatureCollection";
+  features: { geometry: unknown; properties: { height?: number | null } }[];
+  total: number | null;
+  returned: number;
+  truncated: boolean;
+  confidence?: number;
+  heights?: boolean;
+  height_source?: string | null;
+  error?: string;
+}
+
+export interface AcquisitionDates {
+  status: string;
+  days: {
+    date: string;
+    scenes: { id: string | null; datetime: string; cloud: number | null }[];
+    cloud_min: number | null;
+  }[];
+  scene_count: number;
+  window: { from: string | null; to: string | null; max_cloud: number | null };
+  source: string;
   note: string;
 }
 

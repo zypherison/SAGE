@@ -246,6 +246,7 @@ def landcover_overlay(
     date_from: str,
     date_to: str,
     size: int = 1600,
+    focus: int | None = None,
 ) -> dict[str, Any]:
     """A palette-rendered PNG of the modal land-cover classes, plus its bounds.
 
@@ -265,6 +266,9 @@ def landcover_overlay(
         )
 
     label = collection.select("label").mode()
+    if focus is not None:
+        # Marking one class means the others must not tint the imagery.
+        label = label.updateMask(label.eq(int(focus)))
     thumb_url = label.getThumbURL(
         {
             "min": 0,
@@ -290,6 +294,7 @@ def landcover_overlay(
         "png": response.content,
         "bounds": [[min(lats), min(lons)], [max(lats), max(lons)]],
         "scene_count": scene_count,
+        "focus": focus,
     }
 
 
@@ -299,11 +304,16 @@ def building_footprints(
     confidence: float = 0.7,
     limit: int = 3000,
     simplify_m: float = 2.0,
+    heights: bool = False,
 ) -> dict[str, Any]:
     """Open Buildings polygons as GeoJSON, simplified for a browser overlay.
 
     The count is always the true count; `returned` says how many outlines came
     back, so a truncated layer is never presented as the complete set.
+
+    With `heights`, each polygon also gets a `height` from the Open Buildings 2.5D
+    Temporal collection (latest available year at 4 m). Those are *modelled*
+    estimates, not surveyed heights, and the response says so.
     """
     ee = init()
     geom = _geometry(ee, geometry)
@@ -326,6 +336,49 @@ def building_footprints(
     simplified = collection.limit(limit).map(
         lambda feature: ee.Feature(feature.geometry().simplify(simplify_m))
     )
+
+    height_source = None
+    if heights:
+        temporal = (
+            ee.ImageCollection("GOOGLE/Research/open-buildings-temporal/v1")
+            .filterBounds(geom)
+            .select("building_height")
+            .sort("system:time_start", False)
+        )
+        if int(temporal.size().getInfo()) > 0:
+            # `reduceRegions` does not take maxPixels; tileScale keeps the 4 m
+            # reduction within the request budget.
+            reduced = temporal.first().reduceRegions(
+                collection=simplified,
+                reducer=ee.Reducer.max(),
+                scale=4,
+                tileScale=4,
+            )
+            data = reduced.getInfo() or {}
+            features = []
+            for feature in data.get("features", []):
+                value = (feature.get("properties") or {}).get("max")
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": feature.get("geometry"),
+                        "properties": {
+                            "height": None if value is None else round(float(value), 1)
+                        },
+                    }
+                )
+            height_source = "Open Buildings 2.5D Temporal, latest year (modelled)"
+            return {
+                "type": "FeatureCollection",
+                "features": features,
+                "total": total,
+                "returned": len(features),
+                "truncated": total > limit,
+                "confidence": confidence,
+                "heights": True,
+                "height_source": height_source,
+            }
+
     data = simplified.getInfo() or {}
     features = data.get("features", [])
     return {
@@ -335,6 +388,8 @@ def building_footprints(
         "returned": len(features),
         "truncated": total > limit,
         "confidence": confidence,
+        "heights": False,
+        "height_source": height_source,
     }
 
 

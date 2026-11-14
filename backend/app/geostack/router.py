@@ -106,10 +106,25 @@ class FeatureRequest(BaseModel):
     limit: int = 3000
 
 
+class BuildingsRequest(BaseModel):
+    geometry: dict[str, Any]
+    confidence: float = 0.7
+    limit: int = 3000
+    heights: bool = True
+
+
+class DatesRequest(BaseModel):
+    geometry: dict[str, Any]
+    date_from: str | None = None
+    date_to: str | None = None
+    max_cloud: float | None = 20.0
+
+
 class LandcoverOverlayRequest(LandcoverRequest):
     size: int = 1600
     include_buildings: bool = True
     buildings_limit: int = 3000
+    focus: int | None = None
 
 
 def _check_area(vector: Any, geometry: dict[str, Any]) -> dict[str, Any]:
@@ -337,13 +352,20 @@ def landcover_overlay(body: LandcoverOverlayRequest) -> dict[str, Any]:
     _check_area(vector, body.geometry)
     started = time.time()
     overlay = earth.landcover_overlay(
-        body.geometry, date_from=body.date_from, date_to=body.date_to, size=body.size
+        body.geometry,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        size=body.size,
+        focus=body.focus,
     )
 
     directory = Path(config.MAP_DIR) / "overlays"
     directory.mkdir(parents=True, exist_ok=True)
+    # `focus` must be part of the key: a tree-only overlay and the full class
+    # mosaic share the same AOI and window, and hashing them the same way made
+    # the focused image overwrite the full one (caught 2026-11-14).
     digest = hashlib.sha256(
-        f"{body.geometry}|{body.date_from}|{body.date_to}|{body.size}".encode()
+        f"{body.geometry}|{body.date_from}|{body.date_to}|{body.size}|{body.focus}".encode()
     ).hexdigest()[:16]
     path = directory / f"{digest}.png"
     path.write_bytes(overlay["png"])
@@ -354,6 +376,7 @@ def landcover_overlay(body: LandcoverOverlayRequest) -> dict[str, Any]:
         "bytes": len(overlay["png"]),
         "bounds": overlay["bounds"],
         "scene_count": overlay["scene_count"],
+        "focus": overlay["focus"],
         "classes": [
             {"id": entry["id"], "name": entry["name"], "color": entry["color"]}
             for entry in earth.LAND_COVER
@@ -391,6 +414,66 @@ def serve_overlay(name: str) -> FileResponse:
     if not path.exists():
         raise AppError("evidence_not_found", f"no overlay named {name}")
     return FileResponse(path, media_type="image/png")
+
+
+@router.post("/buildings")
+def open_buildings(body: BuildingsRequest) -> dict[str, Any]:
+    vector = _load("vector")
+    earth = _load("earth")
+
+    _check_area(vector, body.geometry)
+    return earth.building_footprints(
+        body.geometry,
+        confidence=body.confidence,
+        limit=body.limit,
+        heights=body.heights,
+    )
+
+
+@router.post("/dates")
+def acquisition_dates(body: DatesRequest) -> dict[str, Any]:
+    """Which Sentinel-2 passes cover this AOI, grouped by calendar day."""
+    vector = _load("vector")
+    stac = _load("stac")
+
+    _check_area(vector, body.geometry)
+    items = stac.search(
+        body.geometry,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        max_cloud=body.max_cloud,
+        limit=20,
+    )
+    items.sort(key=lambda item: item.get("properties", {}).get("datetime") or "", reverse=True)
+
+    days: dict[str, dict[str, Any]] = {}
+    for item in items:
+        properties = item.get("properties") or {}
+        stamp = properties.get("datetime") or ""
+        day = stamp[:10]
+        if not day:
+            continue
+        cloud = properties.get("eo:cloud_cover")
+        entry = days.setdefault(day, {"date": day, "scenes": [], "cloud_min": None})
+        entry["scenes"].append(
+            {
+                "id": item.get("id"),
+                "datetime": stamp,
+                "cloud": None if cloud is None else round(float(cloud), 2),
+            }
+        )
+        if cloud is not None:
+            current = entry["cloud_min"]
+            entry["cloud_min"] = round(float(cloud), 2) if current is None else min(current, round(float(cloud), 2))
+
+    return {
+        "status": "ok" if days else "no_imagery",
+        "days": [days[key] for key in sorted(days, reverse=True)],
+        "scene_count": len(items),
+        "window": {"from": body.date_from, "to": body.date_to, "max_cloud": body.max_cloud},
+        "source": "Earth Search STAC (Sentinel-2 L2A acquisition times)",
+        "note": "Times are scene sensing times; a day can carry more than one overpass.",
+    }
 
 
 @router.post("/features")

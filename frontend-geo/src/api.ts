@@ -1,5 +1,7 @@
 import type {
+  AcquisitionDates,
   AoiMetrics,
+  BuildingLayer,
   Capabilities,
   FeatureLayer,
   IndexResult,
@@ -66,16 +68,38 @@ export const runLandcover = (geometry: PolygonGeometry, dateFrom: string, dateTo
     date_to: dateTo,
   });
 
+export const getBuildings = (geometry: PolygonGeometry, heights = true) =>
+  post<BuildingLayer>("/api/geo/buildings", { geometry, heights });
+
+export const acquisitionDates = (
+  geometry: PolygonGeometry,
+  dateFrom: string,
+  dateTo: string,
+  maxCloud: number,
+) =>
+  post<AcquisitionDates>("/api/geo/dates", {
+    geometry,
+    date_from: dateFrom,
+    date_to: dateTo,
+    max_cloud: maxCloud,
+  });
+
 export const runFeatures = (
   geometry: PolygonGeometry,
   category: "roads" | "monuments",
 ) => post<FeatureLayer>("/api/geo/features", { geometry, category });
 
-export const runLandcoverOverlay = (geometry: PolygonGeometry, dateFrom: string, dateTo: string) =>
+export const runLandcoverOverlay = (
+  geometry: PolygonGeometry,
+  dateFrom: string,
+  dateTo: string,
+  focus: number | null = null,
+) =>
   post<LandcoverOverlay>("/api/geo/landcover/overlay", {
     geometry,
     date_from: dateFrom,
     date_to: dateTo,
+    focus,
   });
 
 export const exportMap = (geometry: PolygonGeometry, title: string, landcover = false) =>
