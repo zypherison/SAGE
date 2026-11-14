@@ -375,6 +375,91 @@ code {
   background: var(--border);
 }
 
+/* ------------------------------------------------------------- 3D terrain */
+.terrain-pane {
+  position: absolute;
+  inset: 0;
+  z-index: 450;
+  background: #0b1220;
+}
+
+.terrain-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.terrain-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.map-tools button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.maplibregl-ctrl-group button {
+  border-radius: 6px !important;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 9.5px !important;
+}
+
+/* ---------------------------------------------------------- published map */
+.published-map {
+  position: absolute;
+  inset: 0;
+  z-index: 600;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--surface);
+}
+
+.published-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.published-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+.published-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.published-actions .btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11.5px;
+}
+
+.published-map iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
 /* ------------------------------------------------------------ layer panel */
 .layer-panel {
   position: absolute;
@@ -853,6 +938,56 @@ code {
   font-size: 12.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.class-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.class-list li {
+  display: grid;
+  grid-template-columns: 10px 84px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.class-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.class-name {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.class-bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.class-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.class-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 500;
 }
 
 .chart {

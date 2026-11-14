@@ -77,12 +77,17 @@ def index_stats(
     date_to: str,
     max_cloud: float = 20.0,
     scale: int = 10,
+    product_id: str | None = None,
 ) -> dict[str, Any]:
     """Median composite over the window, reduced over the AOI.
 
     A median across acquisitions is the honest way to handle clouds here: the
     ArcGIS ImageServer silently ignores `mosaicMethod: median` (measured
     2026-11-13), whereas Earth Engine can actually compute it.
+
+    `product_id` pins the collection to one acquisition (EE `PRODUCT_ID`, e.g.
+    `S2B_MSIL2A_..._T44QKE_...`), which is how the COG path's single scene can be
+    compared with this engine on identical input.
     """
     definition = raster.spec(index)
     band_a, band_b = definition["bands"]
@@ -91,12 +96,15 @@ def index_stats(
 
     geom = _geometry(ee, geometry)
     collection = _masked_collection(ee, geometry=geom, date_from=date_from, date_to=date_to, max_cloud=max_cloud)
+    if product_id:
+        collection = collection.filter(ee.Filter.eq("PRODUCT_ID", product_id))
     scene_count = int(collection.size().getInfo())
     if scene_count == 0:
         raise AppError(
             NO_IMAGERY,
             "Earth Engine found no Sentinel-2 scene for the AOI and window",
             window={"from": date_from, "to": date_to, "max_cloud": max_cloud},
+            product_id=product_id,
         )
 
     composite = collection.select([S2_BAND[band_a], S2_BAND[band_b]]).median()
@@ -137,6 +145,7 @@ def index_stats(
         "stats": stats,
         "scene_count": scene_count,
         "window": {"from": date_from, "to": date_to, "max_cloud": max_cloud},
+        "product_id": product_id,
         "reducer": f"median composite of {scene_count} scenes, SCL-masked, reduced at {scale} m",
         "requested_scale_m": scale,
         "elapsed_seconds": round(time.time() - started, 2),
@@ -188,6 +197,138 @@ def image(
     collection = _masked_collection(ee, geometry=geom, date_from=date_from, date_to=date_to, max_cloud=max_cloud)
     composite = collection.select([S2_BAND[band_a], S2_BAND[band_b]]).median()
     return composite.normalizedDifference([S2_BAND[band_a], S2_BAND[band_b]]).rename(index)
+
+
+# Dynamic World v1 label values, in the order the dataset documents them.
+LAND_COVER = (
+    {"id": 0, "name": "Water", "color": "#419BDF"},
+    {"id": 1, "name": "Trees", "color": "#397D49"},
+    {"id": 2, "name": "Grass", "color": "#88B053"},
+    {"id": 3, "name": "Flooded vegetation", "color": "#7A87C6"},
+    {"id": 4, "name": "Crops", "color": "#E49635"},
+    {"id": 5, "name": "Shrub and scrub", "color": "#DFC35A"},
+    {"id": 6, "name": "Built-up", "color": "#C4281B"},
+    {"id": 7, "name": "Bare", "color": "#A59B8F"},
+    {"id": 8, "name": "Snow and ice", "color": "#B39FE1"},
+)
+LAND_COVER_PALETTE = [entry["color"] for entry in LAND_COVER]
+
+
+def _landcover_collection(ee, geom, date_from: str, date_to: str):
+    return (
+        # Catalogue id as of 2026-11: GOOGLE/DYNAMICWORLD/V1 (the older spaced
+        # "GOOGLE/Dynamic World-LULC/v1" no longer resolves).
+        ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+        .filterBounds(geom)
+        .filterDate(f"{date_from}T00:00:00Z", f"{date_to}T23:59:59Z")
+    )
+
+
+def landcover_image(geometry: dict[str, Any], *, date_from: str, date_to: str):
+    """Modal Dynamic World label over the window, for a map layer."""
+    ee = init()
+    geom = _geometry(ee, geometry)
+    collection = _landcover_collection(ee, geom, date_from, date_to)
+    if int(collection.size().getInfo()) == 0:
+        raise AppError(
+            NO_IMAGERY,
+            "Dynamic World has no land-cover image for the AOI and window",
+            window={"from": date_from, "to": date_to},
+        )
+    return collection.select("label").mode().rename("landcover")
+
+
+def landcover(
+    geometry: dict[str, Any],
+    *,
+    date_from: str,
+    date_to: str,
+    scale: int = 10,
+    buildings: bool = True,
+) -> dict[str, Any]:
+    """Area per Dynamic World class, plus a count of mapped structures.
+
+    This is land *cover*, not object detection: `built-up` is the share of pixels
+    classified as built, and the Open Buildings count comes from a separate
+    polygon dataset. Neither one outlines individual buildings, so the response
+    says so rather than implying a segmentation model.
+    """
+    ee = init()
+    started = time.time()
+    geom = _geometry(ee, geometry)
+    collection = _landcover_collection(ee, geom, date_from, date_to)
+    scene_count = int(collection.size().getInfo())
+    if scene_count == 0:
+        raise AppError(
+            NO_IMAGERY,
+            "Dynamic World has no land-cover image for the AOI and window",
+            window={"from": date_from, "to": date_to},
+        )
+
+    label = collection.select("label").mode()
+    areas = ee.Image.cat(
+        [
+            label.eq(entry["id"]).multiply(ee.Image.pixelArea()).rename(f"c{entry['id']}")
+            for entry in LAND_COVER
+        ]
+    )
+    reduced = areas.reduceRegion(
+        reducer=ee.Reducer.sum(),
+        geometry=geom,
+        scale=scale,
+        maxPixels=int(1e9),
+        bestEffort=True,
+    ).getInfo() or {}
+
+    square_metres = {entry["id"]: float(reduced.get(f"c{entry['id']}") or 0) for entry in LAND_COVER}
+    total_m2 = sum(square_metres.values())
+    classes = []
+    for entry in LAND_COVER:
+        m2 = square_metres[entry["id"]]
+        classes.append(
+            {
+                **entry,
+                "km2": round(m2 / 1e6, 4),
+                "percent": round(m2 / total_m2 * 100, 2) if total_m2 else 0.0,
+            }
+        )
+
+    structures: dict[str, Any] | None = None
+    if buildings:
+        try:
+            polygons = (
+                ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
+                .filterBounds(geom)
+                .filter(ee.Filter.gte("confidence", 0.7))
+            )
+            structures = {
+                "count": int(polygons.size().getInfo()),
+                "confidence": 0.7,
+                "source": "Google Open Buildings v3 polygons",
+            }
+        except Exception as exc:  # noqa: BLE001 - optional dataset, must not fail the call
+            structures = {
+                "count": None,
+                "confidence": 0.7,
+                "source": "Google Open Buildings v3 polygons",
+                "note": f"count unavailable: {type(exc).__name__}",
+            }
+
+    return {
+        "status": "ok" if total_m2 else "insufficient_data",
+        "classes": classes,
+        "total_km2": round(total_m2 / 1e6, 4),
+        "structures": structures,
+        "scene_count": scene_count,
+        "window": {"from": date_from, "to": date_to},
+        "scale_m": scale,
+        "elapsed_seconds": round(time.time() - started, 2),
+        "source": "GOOGLE/DYNAMICWORLD/V1, modal label (Earth Engine), 10 m",
+        "notes": [
+            "Classes are modelled land cover, not object outlines; built-up is a pixel share.",
+            "The structure count comes from Open Buildings polygons, not from the classes.",
+        ],
+    }
 
 
 VIS = {

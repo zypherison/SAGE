@@ -88,6 +88,15 @@ class MapRequest(BaseModel):
     index: str = "ndvi"
     date_from: str | None = None
     date_to: str | None = None
+    landcover: bool = False
+
+
+class LandcoverRequest(BaseModel):
+    geometry: dict[str, Any]
+    date_from: str
+    date_to: str
+    scale: int = 10
+    buildings: bool = True
 
 
 def _check_area(vector: Any, geometry: dict[str, Any]) -> dict[str, Any]:
@@ -292,6 +301,21 @@ def earth_composite(body: CompositeRequest) -> dict[str, Any]:
     return {**result, "source": "Google Earth Engine, COPERNICUS/S2_SR_HARMONIZED"}
 
 
+@router.post("/landcover")
+def earth_landcover(body: LandcoverRequest) -> dict[str, Any]:
+    vector = _load("vector")
+    earth = _load("earth")
+
+    _check_area(vector, body.geometry)
+    return earth.landcover(
+        body.geometry,
+        date_from=body.date_from,
+        date_to=body.date_to,
+        scale=body.scale,
+        buildings=body.buildings,
+    )
+
+
 # --------------------------------------------------------------------------
 # interactive map
 # --------------------------------------------------------------------------
@@ -307,6 +331,7 @@ def make_map(body: MapRequest) -> dict[str, Any]:
         index=body.index,
         date_from=body.date_from,
         date_to=body.date_to,
+        landcover=body.landcover,
     )
 
 

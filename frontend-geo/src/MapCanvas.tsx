@@ -13,16 +13,13 @@ interface Props {
   onCursor: (lat: number, lng: number, zoom: number) => void;
 }
 
-/** Keyless basemaps, chosen for analysis rather than decoration. */
+/**
+ * Keyless basemaps. CARTO's raster tiles now answer "API key required", so all three
+ * come from Esri's ArcGIS Online tile services, which serve without a key
+ * (verified 2026-11-14: 200 image/jpeg for each). The grey canvases keep their labels
+ * as a separate reference layer, hence `overlayUrl`.
+ */
 const BASEMAPS = [
-  {
-    id: "light",
-    label: "Light",
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-  },
   {
     id: "satellite",
     label: "Satellite",
@@ -31,12 +28,22 @@ const BASEMAPS = [
     maxZoom: 19,
   },
   {
+    id: "light",
+    label: "Light",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    overlayUrl:
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Basemap &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors",
+    maxZoom: 16,
+  },
+  {
     id: "dark",
     label: "Dark",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    overlayUrl:
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Basemap &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors",
+    maxZoom: 16,
   },
 ] as const;
 
@@ -54,6 +61,7 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
   const mapRef = useRef<L.Map | null>(null);
   const aoiRef = useRef<L.LayerGroup | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
+  const labelRef = useRef<L.TileLayer | null>(null);
   const [basemap, setBasemap] = useState<string>(BASEMAPS[0].id);
 
   const callbacks = useRef({ onGeometry, onFinish, onCursor });
@@ -89,12 +97,18 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
     if (!map) return;
     const config = BASEMAPS.find((b) => b.id === basemap) ?? BASEMAPS[0];
     tileRef.current?.remove();
+    labelRef.current?.remove();
     tileRef.current = L.tileLayer(config.url, {
       attribution: config.attribution,
       maxZoom: config.maxZoom,
-      subdomains: "abcd",
       detectRetina: true,
     }).addTo(map);
+    if ("overlayUrl" in config && config.overlayUrl) {
+      labelRef.current = L.tileLayer(config.overlayUrl, {
+        maxZoom: config.maxZoom,
+        detectRetina: true,
+      }).addTo(map);
+    }
   }, [basemap]);
 
   useEffect(() => {

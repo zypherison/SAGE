@@ -2,6 +2,7 @@ import type {
   AoiMetrics,
   Capabilities,
   IndexResult,
+  LandcoverResult,
   MapResult,
   PolygonGeometry,
   PopulationResult,
@@ -56,5 +57,12 @@ export const runIndex = (options: {
 export const runPopulation = (geometry: PolygonGeometry, iso3: string, year: number) =>
   post<PopulationResult>("/api/geo/population", { geometry, iso3, year });
 
-export const exportMap = (geometry: PolygonGeometry, title: string) =>
-  post<MapResult>("/api/geo/map", { geometry, title });
+export const runLandcover = (geometry: PolygonGeometry, dateFrom: string, dateTo: string) =>
+  post<LandcoverResult>("/api/geo/landcover", {
+    geometry,
+    date_from: dateFrom,
+    date_to: dateTo,
+  });
+
+export const exportMap = (geometry: PolygonGeometry, title: string, landcover = false) =>
+  post<MapResult>("/api/geo/map", { geometry, title, landcover });

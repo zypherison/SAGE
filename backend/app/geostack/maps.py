@@ -30,6 +30,7 @@ def build(
     index: str = "ndvi",
     date_from: str | None = None,
     date_to: str | None = None,
+    landcover: bool = False,
 ) -> dict[str, Any]:
     geemap = capabilities.require("geemap")
     # ipyleaflet asks asyncio for the current loop while the Map is built. A
@@ -73,10 +74,26 @@ def build(
     else:
         ee_note = "no date window given; map shows the AOI only"
 
+    if landcover and date_from and date_to:
+        try:
+            from app.geostack import earth as earth_mod
+
+            lc_image = earth_mod.landcover_image(geometry, date_from=date_from, date_to=date_to)
+            add = getattr(m, "add_ee_layer", None) or getattr(m, "addLayer", None)
+            if add is not None:
+                add(lc_image, {"min": 0, "max": 8, "palette": earth_mod.LAND_COVER_PALETTE}, "Land cover")
+                layers.append("Land cover (Dynamic World)")
+        except AppError as exc:
+            if exc.code != GEOSTACK_UNAVAILABLE:
+                raise
+            ee_note = ee_note or "Earth Engine not configured; map shows the AOI only"
+
     if hasattr(m, "add_layer_control"):
         m.add_layer_control()
 
-    digest = hashlib.sha256(f"{title}|{geometry}|{index}|{date_from}|{date_to}".encode()).hexdigest()[:16]
+    digest = hashlib.sha256(
+        f"{title}|{geometry}|{index}|{date_from}|{date_to}|{landcover}".encode()
+    ).hexdigest()[:16]
     directory = Path(config.MAP_DIR)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{digest}.html"

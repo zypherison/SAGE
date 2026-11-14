@@ -117,6 +117,32 @@ export interface Capabilities {
   notes: string[];
 }
 
+export interface LandcoverClass {
+  id: number;
+  name: string;
+  color: string;
+  km2: number;
+  percent: number;
+}
+
+export interface LandcoverResult {
+  status: string;
+  classes: LandcoverClass[];
+  total_km2: number;
+  structures: {
+    count: number | null;
+    confidence: number;
+    source: string;
+    note?: string;
+  } | null;
+  scene_count: number;
+  window: { from: string; to: string };
+  scale_m: number;
+  elapsed_seconds: number;
+  source: string;
+  notes: string[];
+}
+
 export interface MapResult {
   map_id: string;
   url: string;

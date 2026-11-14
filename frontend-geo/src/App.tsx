@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapCanvas, { type DrawMode } from "./MapCanvas";
 import {
   aoiMetrics,
   exportMap,
   getCapabilities,
   runIndex,
+  runLandcover,
   runPopulation,
 } from "./api";
 import type {
   AoiMetrics,
   Capabilities,
   IndexResult,
+  LandcoverResult,
   MapResult,
   PolygonGeometry,
   PopulationResult,
@@ -24,8 +26,12 @@ import {
   IconMark,
   IconPolygon,
   IconSquare,
+  IconTerrain,
   IconTrash,
 } from "./icons";
+
+// Split out: MapLibre is only paid for when someone opens the 3D view.
+const TerrainView = lazy(() => import("./TerrainView"));
 
 const INDEXES = [
   { id: "ndvi", label: "NDVI", description: "Vegetation" },
@@ -47,13 +53,16 @@ type Tab = "tools" | "results";
 export default function App() {
   const [geometry, setGeometry] = useState<PolygonGeometry | null>(null);
   const [mode, setMode] = useState<DrawMode>("none");
+  const [view3d, setView3d] = useState(false);
   const [tab, setTab] = useState<Tab>("tools");
 
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [metrics, setMetrics] = useState<AoiMetrics | null>(null);
   const [index, setIndex] = useState<IndexResult | null>(null);
   const [population, setPopulation] = useState<PopulationResult | null>(null);
+  const [landcover, setLandcover] = useState<LandcoverResult | null>(null);
   const [mapResult, setMapResult] = useState<MapResult | null>(null);
+  const [showPublished, setShowPublished] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -154,12 +163,20 @@ export default function App() {
       setTab("results");
     });
 
+  const classifyLand = () =>
+    withTiming("landcover", async () => {
+      if (!geometry) throw new Error("Draw an area of interest first.");
+      const result = await runLandcover(geometry, dateFrom, dateTo);
+      setLandcover(result);
+      setTab("results");
+    });
+
   const publishMap = () =>
     withTiming("map", async () => {
       if (!geometry) throw new Error("Draw an area of interest first.");
-      const result = await exportMap(geometry, "SAGE Geo Workbench AOI");
+      const result = await exportMap(geometry, "SAGE Geo Workbench AOI", Boolean(landcover));
       setMapResult(result);
-      window.open(result.url, "_blank", "noopener");
+      setShowPublished(true);
     });
 
   const copyCitation = async () => {
@@ -177,7 +194,8 @@ export default function App() {
   }, [index]);
 
   const ready = Boolean(geometry) && !busy;
-  const resultCount = Number(Boolean(index)) + Number(Boolean(population));
+  const resultCount =
+    Number(Boolean(index)) + Number(Boolean(population)) + Number(Boolean(landcover));
   const selectedIndex = INDEXES.find((entry) => entry.id === indexName) ?? INDEXES[0];
 
   return (
@@ -238,6 +256,14 @@ export default function App() {
             onCursor={(lat, lng, zoom) => setCursor({ lat, lng, zoom })}
           />
 
+          {view3d && (
+            <div className="terrain-pane">
+              <Suspense fallback={<div className="terrain-loading">Loading 3D terrain…</div>}>
+                <TerrainView geometry={geometry} />
+              </Suspense>
+            </div>
+          )}
+
           <div className="map-tools" role="toolbar" aria-label="Draw tools">
             <button
               type="button"
@@ -253,7 +279,8 @@ export default function App() {
               type="button"
               className={mode === "rect" ? "is-active" : ""}
               onClick={() => setMode("rect")}
-              title="Draw a rectangle"
+              disabled={view3d}
+              title={view3d ? "Switch to the 2D view to draw" : "Draw a rectangle"}
             >
               <IconSquare />
               Box
@@ -262,11 +289,39 @@ export default function App() {
               type="button"
               className={mode === "polygon" ? "is-active" : ""}
               onClick={() => setMode("polygon")}
-              title="Draw a polygon"
+              disabled={view3d}
+              title={view3d ? "Switch to the 2D view to draw" : "Draw a polygon"}
             >
               <IconPolygon />
               Polygon
             </button>
+            <span className="tool-separator" />
+            <button
+              type="button"
+              className={view3d ? "is-active" : ""}
+              onClick={() => {
+                setView3d((value) => !value);
+                setMode("none");
+              }}
+              title="Toggle 3D terrain view"
+            >
+              <IconTerrain />
+              3D
+            </button>
+            {mapResult && (
+              <>
+                <span className="tool-separator" />
+                <button
+                  type="button"
+                  className={showPublished ? "is-active" : ""}
+                  onClick={() => setShowPublished((value) => !value)}
+                  title="Show the published Earth Engine map"
+                >
+                  <IconLayers />
+                  Published
+                </button>
+              </>
+            )}
           </div>
 
           <section className="layer-panel" aria-label="Layers">
@@ -302,15 +357,38 @@ export default function App() {
               </li>
             </ul>
             <p className="layer-hint">
-              {mode === "polygon"
-                ? "Click each corner, then double-click to close. Esc cancels."
-                : mode === "rect"
-                  ? "Drag a rectangle over the area to analyse."
-                  : geometry
-                    ? "Draw again to replace the current area."
-                    : "Select Box or Polygon to begin."}
+              {view3d
+                ? "3D terrain: drag to orbit, right-drag to pan. Drawing needs the 2D view."
+                : mode === "polygon"
+                  ? "Click each corner, then double-click to close. Esc cancels."
+                  : mode === "rect"
+                    ? "Drag a rectangle over the area to analyse."
+                    : geometry
+                      ? "Draw again to replace the current area."
+                      : "Select Box or Polygon to begin."}
             </p>
           </section>
+
+          {mapResult && showPublished && (
+            <section className="published-map" aria-label="Published map">
+              <div className="published-bar">
+                <span className="published-title">
+                  <IconLayers />
+                  {mapResult.title} · {mapResult.layers.join(" + ")}
+                </span>
+                <span className="published-actions">
+                  <a className="btn" href={mapResult.url} target="_blank" rel="noreferrer">
+                    <IconExternal />
+                    New tab
+                  </a>
+                  <button type="button" className="btn" onClick={() => setShowPublished(false)}>
+                    Back to canvas
+                  </button>
+                </span>
+              </div>
+              <iframe src={mapResult.url} title={`Published map: ${mapResult.title}`} />
+            </section>
+          )}
         </main>
 
         <aside className="panel">
@@ -442,6 +520,26 @@ export default function App() {
 
                 <section className="section">
                   <div className="section-head">
+                    <h2>Land cover and structures</h2>
+                    <p>Dynamic World 10 m classes, plus Open Buildings counts, over the same window</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-block"
+                    onClick={classifyLand}
+                    disabled={!ready}
+                  >
+                    {busy === "landcover" ? "Classifying…" : "Classify land cover"}
+                  </button>
+                  <p className="field-note">
+                    Modelled cover per pixel, not object outlines: built-up is an area share.
+                  </p>
+                </section>
+
+                <hr className="divider" />
+
+                <section className="section">
+                  <div className="section-head">
                     <h2>Population estimate</h2>
                     <p>WorldPop 1 km UN-adjusted, cached locally</p>
                   </div>
@@ -539,11 +637,13 @@ export default function App() {
               <ResultsPane
                 index={index}
                 population={population}
+                landcover={landcover}
                 mapResult={mapResult}
                 histogram={histogram}
                 copied={copied}
                 onCopy={copyCitation}
                 onOpenTools={() => setTab("tools")}
+                onShowMap={() => setShowPublished(true)}
               />
             )}
           </div>
@@ -578,21 +678,25 @@ export default function App() {
 function ResultsPane({
   index,
   population,
+  landcover,
   mapResult,
   histogram,
   copied,
   onCopy,
   onOpenTools,
+  onShowMap,
 }: {
   index: IndexResult | null;
   population: PopulationResult | null;
+  landcover: LandcoverResult | null;
   mapResult: MapResult | null;
   histogram: { low: number; high: number; count: number; share: number }[];
   copied: boolean;
   onCopy: () => void;
   onOpenTools: () => void;
+  onShowMap: () => void;
 }) {
-  if (!index && !population) {
+  if (!index && !population && !landcover) {
     return (
       <div className="empty-state">
         <span className="empty-icon">
@@ -798,6 +902,53 @@ function ResultsPane({
         </section>
       )}
 
+      {landcover && (
+        <section className="result">
+          <header className="result-head">
+            <div>
+              <h2>Land cover</h2>
+              <p>
+                Dynamic World · {landcover.scene_count} scenes · {landcover.scale_m} m
+              </p>
+            </div>
+            <span className="pill">{landcover.total_km2.toFixed(2)} km²</span>
+          </header>
+
+          <ul className="class-list">
+            {[...landcover.classes]
+              .sort((a, b) => b.percent - a.percent)
+              .filter((entry) => entry.percent > 0)
+              .map((entry) => (
+                <li key={entry.id}>
+                  <i className="class-swatch" style={{ background: entry.color }} />
+                  <span className="class-name">{entry.name}</span>
+                  <span className="class-bar">
+                    <i style={{ width: `${Math.max(entry.percent, 2)}%`, background: entry.color }} />
+                  </span>
+                  <span className="class-value">{entry.percent.toFixed(1)}%</span>
+                </li>
+              ))}
+          </ul>
+
+          {landcover.structures && (
+            <div className="headline-stat">
+              <div className="headline-value">
+                <strong>{landcover.structures.count === null ? "—" : integer(landcover.structures.count)}</strong>
+                <span>mapped structures</span>
+              </div>
+              <span className="pill">Open Buildings v3</span>
+            </div>
+          )}
+
+          <ul className="notes">
+            {landcover.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+            {landcover.structures?.note && <li>{landcover.structures.note}</li>}
+          </ul>
+        </section>
+      )}
+
       {mapResult && (
         <section className="result">
           <header className="result-head">
@@ -808,10 +959,16 @@ function ResultsPane({
             <span className="pill">{Math.round(mapResult.bytes / 1024)} KB</span>
           </header>
           {mapResult.note && <p className="empty-note">{mapResult.note}</p>}
-          <a className="btn btn-block" href={mapResult.url} target="_blank" rel="noreferrer">
-            <IconExternal />
-            Open interactive map
-          </a>
+          <div className="result-actions">
+            <button type="button" className="btn" onClick={onShowMap}>
+              <IconLayers />
+              Show on map
+            </button>
+            <a className="btn" href={mapResult.url} target="_blank" rel="noreferrer">
+              <IconExternal />
+              New tab
+            </a>
+          </div>
         </section>
       )}
     </>

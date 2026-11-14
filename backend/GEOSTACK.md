@@ -49,7 +49,8 @@ problem (an installable desktop GIS) and would be scope without purpose here.
 | POST | `/api/geo/index` | index statistics from a real scene: COG window, SCL mask, histogram, evidence id, optional PNG |
 | POST | `/api/geo/population` | WorldPop population inside the AOI, with the raster's provenance |
 | POST | `/api/geo/composite` | Earth Engine median composite over a window (503 until configured) |
-| POST | `/api/geo/map` | writes an interactive geemap HTML map, optionally with an EE layer |
+| POST | `/api/geo/landcover` | Dynamic World class areas, plus an Open Buildings structure count |
+| POST | `/api/geo/map` | writes an interactive geemap HTML map, optionally with EE and land-cover layers |
 | GET | `/api/geo/map/{id}` | serves that map |
 | GET | `/api/geo/preview/{id}` | serves an index PNG |
 
@@ -174,8 +175,28 @@ Verified on 2026-11-13 through the dev proxy: `/api/geo/index` returned 200 in
 25.8 s, mean NDVI 0.1723, 83,134 valid pixels, a 121,846-byte 266×324 PNG preview,
 and the deterministic evidence id `6510d1b2d73c15ef`.
 
-Limits: one AOI at a time and no tile layer (the preview is a single PNG). The Earth
-Engine options appear once credentials exist.
+The basemap switch uses Esri's ArcGIS Online tiles for all three modes. CARTO's
+raster basemaps began answering "API key required", so Light and Dark were moved to
+Esri's grey canvases plus their label reference layers, and Satellite is the default
+— all keyless (each tile URL checked for a 200 on 2026-11-14).
+
+A **3D** toggle replaces the map with MapLibre GL: Esri satellite draped over the
+AWS/Mapterhorn Terrarium DEM at 1.4× exaggeration, orbit and pitch enabled. That is
+exactly what GeoLibre's 3D mode buys — real terrain relief — without its WASM/DuckDB
+stack. MapLibre is a lazy chunk (1.06 MB, loaded only when 3D is opened), which is why
+the initial bundle stayed at 322 kB. Drawing is disabled in 3D because the draw tools
+belong to the Leaflet surface; the AOI is shown as an overlay instead.
+
+**Land cover** runs Dynamic World through the same Earth Engine project and returns
+area per class plus a structure count, so the workbench can answer "how much of this
+is water, trees, built-up" rather than only how green it is. Two limits are stated in
+the UI and the response: classes are modelled 10 m cover, not object outlines, and the
+structure count comes from Open Buildings polygons, not from the class raster. Marking
+*individual* buildings, trees or river centrelines would need a detection model, not a
+land-cover product.
+
+Limits: one AOI at a time and no raster tile layer (the preview is a single PNG). The
+Earth Engine options appear once credentials exist.
 
 ### Measured with Earth Engine, 2026-11-14
 
@@ -188,17 +209,55 @@ the day before:
 | stats | mean NDVI 0.1605, median 0.0508, p10 −0.1286, p90 0.6758 |
 | `POST /api/geo/map` | 200 in 2 s, 36,748-byte geemap HTML, layers AOI + NDVI composite |
 
-The COG path gave mean 0.1724 over a window ending 2026-11-13. The two are not
-expected to match pixel for pixel, because scene selection and masking differ (four
-scenes here), so this is agreement in range, not a validation of either engine. The
-wide mean–median gap is the lake: open water is strongly negative NDVI and covers a
-large share of this AOI.
+The COG path gave mean 0.1724 over a window ending 2026-11-13. Comparing those two
+endpoint outputs conflates scene selection with engine behaviour, so
+`scripts/compare_engines.py` pins both sides to one granule (STAC `s2:product_uri`
+minus `.SAFE` is EE `PRODUCT_ID`) and compares four acquisitions:
+
+| Scene | COG mean | EE mean | delta |
+| --- | --- | --- | --- |
+| S2C_43QHV_20261113 | 0.1724 | 0.1726 | +0.0002 |
+| S2C_44QKE_20261113 | 0.1718 | 0.1723 | +0.0005 |
+| S2B_43QHV_20261108 | 0.1534 | 0.1536 | +0.0002 |
+| S2B_44QKE_20261108 | 0.1524 | 0.1527 | +0.0003 |
+
+On identical input the engines agree to within 0.0005 NDVI, so the earlier 0.17 vs
+0.16 gap was the date window's scene mix, not a convention error. Pixel counts still
+differ (83,134 vs 88,214) because the COG path reads the native UTM grid while Earth
+Engine reprojects to a WGS84 10 m grid; that is resampling, not a bug.
+
+### Land cover, 2026-11-14
+
+`POST /api/geo/landcover` over the same AOI and window returned 200 in 14 s: 3
+Dynamic World images, 8.30 km² total — water 56.0 %, built-up 32.9 %, trees 8.9 %,
+flooded vegetation 0.9 %, crops 0.8 % — and 5,522 structures from Google Open
+Buildings v3 at confidence ≥ 0.7. Publishing the map with `landcover: true` produced
+a 42,653-byte HTML with AOI, NDVI and land-cover layers in 4 s.
+
+The catalogue id is `GOOGLE/DYNAMICWORLD/V1`; the older spaced
+`GOOGLE/Dynamic World-LULC/v1` now fails with asset-not-found (tested 2026-11-14),
+which is why that error arrives as a 500 rather than a 503 — the credentials are
+fine, the dataset name was not.
 
 ## Tests
 
 ```bash
 .venv/bin/python -m pytest tests -q        # 170 pass, 32 of them geostack
 ```
+
+## Starting with credentials loaded
+
+`scripts/start.sh` reads `~/.config/sage/ee.env` (override with `SAGE_ENV_FILE`) and
+exports whatever it defines before exec'ing uvicorn, so the service account does not
+have to be re-typed per shell:
+
+```bash
+backend/scripts/start.sh            # host 127.0.0.1:8000 by default
+PORT=8001 backend/scripts/start.sh
+```
+
+The env file is `KEY=value` with `chmod 600`, outside the repository. A missing file
+is not an error: the API starts and Earth Engine endpoints report 503.
 
 The geostack tests are offline: synthetic GeoTIFFs for the raster and WorldPop
 maths, a bow-tie polygon for repair, fake STAC items for the reflectance

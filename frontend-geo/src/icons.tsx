@@ -69,6 +69,13 @@ export const IconMark = ({ size = 22 }: IconProps) => (
   </svg>
 );
 
+export const IconTerrain = ({ size = 15 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M3 19l5.5-9 3.5 5.5 2.5-3.5L21 19z" />
+    <path d="M8.5 10l1.9 1.7 1.5-1.3" opacity="0.55" />
+  </svg>
+);
+
 export const IconEmpty = ({ size = 26 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M12 3l9 5-9 5-9-5z" />
