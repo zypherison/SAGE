@@ -114,17 +114,47 @@ be nodata, which is reported as `no_population_pixels`, not as "0 people".
 | `SAGE_MAP_DIR` | where HTML maps and previews are written |
 | `SAGE_GEOSTACK_MAX_PIXELS` | refuse an AOI window above this many pixels (default 40 M) |
 
-Earth Engine is **not** configured yet; `/api/geo/composite` and EE map layers stay
-disabled until the three variables are set, which is the intended behaviour rather
-than a failure.
+Earth Engine stays optional: `/api/geo/composite` and EE map layers return a 503 with
+the variable names until all three are set, which is the intended behaviour rather
+than a failure. It was configured on 2026-11-14 against project `sage-geospatial` with
+service account `sage-geo@sage-geospatial.iam.gserviceaccount.com` and a key kept
+outside the repository at `~/.config/sage/ee-key.json`.
+
+### Setting it up from scratch
+
+A service account is the only shape that works unattended; user OAuth expires.
+
+1. Create a Cloud project and enable the Earth Engine API on it.
+2. Register that project at <https://code.earthengine.google.com/register>. Enabling
+the API alone is not enough — calls then fail with `PERMISSION_DENIED`.
+3. Create a service account and grant it **Earth Engine Resource Viewer** and
+**Service Usage Consumer**. The second one is the usual omission: without it the
+account authenticates and every request still returns 403.
+4. Create a JSON key and move it out of the repo (`chmod 600`). `*.ee.json`,
+`ee-key*.json` and `backend/.ee/` are gitignored as a second line of defence.
+
+Then check it end to end, without starting the API:
+
+```bash
+SAGE_EE_PROJECT=sage-geospatial \
+SAGE_EE_SERVICE_ACCOUNT=sage-geo@sage-geospatial.iam.gserviceaccount.com \
+SAGE_EE_KEY_FILE="$HOME/.config/sage/ee-key.json" \
+  .venv/bin/python scripts/ee_check.py
+```
+
+`scripts/ee_check.py` prints the config (never the key), initialises, counts scenes
+and runs a real NDVI reduction, and names the likely cause of each failure: 403 is
+project registration or a missing IAM role, 401 a rejected key, 404 a wrong project
+id.
 
 ## Geo Workbench (`frontend-geo/`)
 
 A second, branch-only frontend that speaks this API directly. It is not the SAGE UI
 with a new skin: the layout follows GeoLibre's working surface — full-bleed dark
-map, a floating layer card, a right-hand tool dock, and a status bar carrying
-cursor, area, valid pixels and scene — because an index raster is easier to read
-when the map is the page and the controls are on top of it.
+map, a light cartographic basemap by default, a floating layer card, a right-hand
+sectioned panel, and a status bar carrying cursor, area and valid pixels — because an
+index raster is easier to read when the map is the page and the controls sit on top,
+while measurements stay legible against a neutral background.
 
 ```bash
 cd frontend-geo
@@ -144,13 +174,30 @@ Verified on 2026-11-13 through the dev proxy: `/api/geo/index` returned 200 in
 25.8 s, mean NDVI 0.1723, 83,134 valid pixels, a 121,846-byte 266×324 PNG preview,
 and the deterministic evidence id `6510d1b2d73c15ef`.
 
-Limits: one AOI at a time, no tile layer (the preview is a single PNG), and the
-Earth Engine layer appears only once credentials exist.
+Limits: one AOI at a time and no tile layer (the preview is a single PNG). The Earth
+Engine options appear once credentials exist.
+
+### Measured with Earth Engine, 2026-11-14
+
+Same AOI and window (2026-10-20 → 2026-11-13, max cloud 20) that the COG path ran
+the day before:
+
+| Call | Result |
+| --- | --- |
+| `POST /api/geo/composite` | 200 in 7.0 s wall (4.0 s server), 4 scenes, 88,224 valid px at 10 m |
+| stats | mean NDVI 0.1605, median 0.0508, p10 −0.1286, p90 0.6758 |
+| `POST /api/geo/map` | 200 in 2 s, 36,748-byte geemap HTML, layers AOI + NDVI composite |
+
+The COG path gave mean 0.1724 over a window ending 2026-11-13. The two are not
+expected to match pixel for pixel, because scene selection and masking differ (four
+scenes here), so this is agreement in range, not a validation of either engine. The
+wide mean–median gap is the lake: open water is strongly negative NDVI and covers a
+large share of this AOI.
 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests -q        # 169 pass, 32 of them geostack
+.venv/bin/python -m pytest tests -q        # 170 pass, 32 of them geostack
 ```
 
 The geostack tests are offline: synthetic GeoTIFFs for the raster and WorldPop

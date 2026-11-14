@@ -73,6 +73,8 @@ def earth_engine_config() -> dict[str, Any]:
         "configured": configured,
         "project": project or None,
         "service_account": account or None,
+        # kept for earth.init(); never included in the public capabilities report
+        "key_file": key_file or None,
         "key_file_present": bool(key_file and os.path.exists(key_file)),
     }
 
@@ -81,6 +83,7 @@ def report() -> dict[str, Any]:
     versions = {dist: version(mod) for dist, mod in MODULES.items()}
     missing = [dist for dist, ver in versions.items() if ver is None]
     ee = earth_engine_config()
+    ee.pop("key_file", None)
     return {
         "stack": "geostack",
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",

@@ -13,3 +13,8 @@ backend/data/evidence.jsonl
 backend/data/cache/
 backend/data/maps/
 backend/data/evidence.jsonl
+
+# Earth Engine service-account keys must never be committed
+*.ee.json
+ee-key*.json
+backend/.ee/
