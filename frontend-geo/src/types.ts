@@ -143,6 +143,38 @@ export interface LandcoverResult {
   notes: string[];
 }
 
+export interface LandcoverOverlay {
+  status: string;
+  image_url: string;
+  bytes: number;
+  bounds: [[number, number], [number, number]];
+  scene_count: number;
+  classes: { id: number; name: string; color: string }[];
+  elapsed_seconds: number;
+  buildings?: {
+    type: "FeatureCollection";
+    features: unknown[];
+    total: number | null;
+    returned: number;
+    truncated: boolean;
+    confidence?: number;
+    error?: string;
+  };
+}
+
+export interface FeatureLayer {
+  type: "FeatureCollection";
+  features: unknown[];
+  category: string;
+  label: string;
+  count: number;
+  truncated: boolean;
+  limit: number;
+  source: string;
+  licence: string;
+  note: string;
+}
+
 export interface MapResult {
   map_id: string;
   url: string;

@@ -4,14 +4,19 @@ import {
   aoiMetrics,
   exportMap,
   getCapabilities,
+  runFeatures,
   runIndex,
   runLandcover,
+  runLandcoverOverlay,
   runPopulation,
 } from "./api";
+import { HELP_TEXT, SUGGESTIONS, parseCommand } from "./assistant";
 import type {
   AoiMetrics,
   Capabilities,
+  FeatureLayer,
   IndexResult,
+  LandcoverOverlay,
   LandcoverResult,
   MapResult,
   PolygonGeometry,
@@ -48,7 +53,8 @@ const decimal = (value: number | null | undefined, digits = 3) =>
 const integer = (value: number | null | undefined) =>
   value === null || value === undefined ? "—" : value.toLocaleString("en-IN");
 
-type Tab = "tools" | "results";
+type Tab = "tools" | "results" | "assistant";
+type ChatMessage = { role: "user" | "agent"; text: string };
 
 export default function App() {
   const [geometry, setGeometry] = useState<PolygonGeometry | null>(null);
@@ -61,6 +67,14 @@ export default function App() {
   const [index, setIndex] = useState<IndexResult | null>(null);
   const [population, setPopulation] = useState<PopulationResult | null>(null);
   const [landcover, setLandcover] = useState<LandcoverResult | null>(null);
+  const [overlay, setOverlay] = useState<LandcoverOverlay | null>(null);
+  const [showLandcover, setShowLandcover] = useState(true);
+  const [showBuildings, setShowBuildings] = useState(true);
+  const [featureLayers, setFeatureLayers] = useState<FeatureLayer[]>([]);
+  const [hiddenFeatures, setHiddenFeatures] = useState<Record<string, boolean>>({});
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const [mapResult, setMapResult] = useState<MapResult | null>(null);
   const [showPublished, setShowPublished] = useState(false);
 
@@ -81,6 +95,7 @@ export default function App() {
   const [year, setYear] = useState(2020);
 
   const copyTimer = useRef<number | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     getCapabilities()
@@ -93,6 +108,11 @@ export default function App() {
       setMetrics(null);
       return;
     }
+    // The class, building and OSM layers belong to the area they were computed for.
+    setOverlay(null);
+    setLandcover(null);
+    setFeatureLayers([]);
+    setHiddenFeatures({});
     let cancelled = false;
     aoiMetrics(geometry)
       .then((result) => {
@@ -169,6 +189,16 @@ export default function App() {
       const result = await runLandcover(geometry, dateFrom, dateTo);
       setLandcover(result);
       setTab("results");
+      // The drawn layer is a second Earth Engine pass; losing it must not hide
+      // the numbers that already succeeded.
+      try {
+        const layer = await runLandcoverOverlay(geometry, dateFrom, dateTo);
+        setOverlay(layer);
+        setShowLandcover(true);
+        setShowBuildings(true);
+      } catch {
+        setOverlay(null);
+      }
     });
 
   const publishMap = () =>
@@ -179,6 +209,133 @@ export default function App() {
       setShowPublished(true);
     });
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, chatBusy]);
+
+  const pushMessage = (role: ChatMessage["role"], text: string) =>
+    setMessages((current) => [...current, { role, text }]);
+
+  const ensureOverlay = async () => {
+    if (overlay) return overlay;
+    if (!geometry) throw new Error("Draw an area of interest first.");
+    const layer = await runLandcoverOverlay(geometry, dateFrom, dateTo);
+    setOverlay(layer);
+    return layer;
+  };
+
+  const ask = async (raw: string) => {
+    const text = raw.trim();
+    if (!text || chatBusy) return;
+    pushMessage("user", text);
+    setDraft("");
+    if (!geometry) {
+      pushMessage("agent", "Draw an area on the map first, then ask again.");
+      return;
+    }
+    setChatBusy(true);
+    const intent = parseCommand(text);
+    try {
+      if (intent.kind === "help") {
+        pushMessage("agent", HELP_TEXT);
+        return;
+      }
+      if (intent.kind === "features") {
+        const result = await runFeatures(geometry, intent.category);
+        setFeatureLayers((current) => [
+          ...current.filter((layer) => layer.category !== result.category),
+          result,
+        ]);
+        setHiddenFeatures((current) => ({ ...current, [result.category]: false }));
+        const what = intent.category === "roads" ? "road segments" : "monuments and landmarks";
+        const truncated = result.truncated
+          ? ` Only the first ${result.limit.toLocaleString("en-IN")} were drawn.`
+          : "";
+        pushMessage(
+          "agent",
+          `Marked ${result.count.toLocaleString("en-IN")} ${what} from OpenStreetMap on the map.${truncated}`,
+        );
+        return;
+      }
+      if (intent.kind === "buildings") {
+        const layer = await ensureOverlay();
+        const buildings = layer.buildings;
+        if (!buildings || buildings.returned === 0) {
+          pushMessage("agent", "No building footprints came back for this area.");
+          return;
+        }
+        setShowBuildings(true);
+        const total = buildings.total === null ? "" : ` of ${buildings.total.toLocaleString("en-IN")}`;
+        const truncated = buildings.truncated ? ` Showing the first ${buildings.returned.toLocaleString("en-IN")}.` : "";
+        pushMessage(
+          "agent",
+          `Marked ${buildings.returned.toLocaleString("en-IN")} building footprints${total} ` +
+            `(Open Buildings v3, confidence ≥ ${buildings.confidence ?? 0.7}).${truncated}`,
+        );
+        return;
+      }
+      if (intent.kind === "landcover") {
+        const result = landcover ?? (await runLandcover(geometry, dateFrom, dateTo));
+        if (!landcover) setLandcover(result);
+        await ensureOverlay();
+        setShowLandcover(true);
+        if (intent.focus === null) {
+          const top = [...result.classes].sort((a, b) => b.percent - a.percent).slice(0, 3);
+          pushMessage(
+            "agent",
+            `Land cover over ${result.total_km2.toFixed(2)} km²: ` +
+              top.map((entry) => `${entry.name.toLowerCase()} ${entry.percent.toFixed(1)}%`).join(", ") +
+              ". The class layer is on the map.",
+          );
+        } else {
+          const found = result.classes.find((entry) => entry.id === intent.focus);
+          pushMessage(
+            "agent",
+            found
+              ? `${found.name}: ${found.percent.toFixed(1)}% of the area (${found.km2.toFixed(2)} km²), from ` +
+                  `${result.scene_count} Dynamic World scenes. The class layer is now shown.`
+              : "That class did not appear in the result.",
+          );
+        }
+        return;
+      }
+      if (intent.kind === "index") {
+        const result = await runIndex({
+          geometry,
+          index: intent.index,
+          dateFrom,
+          dateTo,
+          maxCloud,
+          cloudMask,
+          preview,
+        });
+        setIndex(result);
+        setTab("results");
+        pushMessage(
+          "agent",
+          `${result.label} mean ${result.stats?.mean?.toFixed(4) ?? "—"} over ` +
+            `${result.stats?.count?.toLocaleString("en-IN") ?? "—"} valid pixels (scene ${result.scene.id}). ` +
+            "The Results tab has the detail.",
+        );
+        return;
+      }
+      if (intent.kind === "population") {
+        const result = await runPopulation(geometry, iso3.trim().toUpperCase(), Number(year));
+        setPopulation(result);
+        setTab("results");
+        pushMessage(
+          "agent",
+          `About ${result.population?.toLocaleString("en-IN") ?? "—"} residents ` +
+            `(${result.density_per_km2?.toFixed(0) ?? "—"}/km²), WorldPop ${result.source.year}.`,
+        );
+      }
+    } catch (exc) {
+      pushMessage("agent", `That failed: ${exc instanceof Error ? exc.message : String(exc)}`);
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
   const copyCitation = async () => {
     if (!index) return;
     await navigator.clipboard.writeText(index.citation);
@@ -186,6 +343,11 @@ export default function App() {
     if (copyTimer.current) window.clearTimeout(copyTimer.current);
     copyTimer.current = window.setTimeout(() => setCopied(false), 1800);
   };
+
+  const visibleFeatures = useMemo(
+    () => featureLayers.filter((layer) => !hiddenFeatures[layer.category]),
+    [featureLayers, hiddenFeatures],
+  );
 
   const histogram = useMemo(() => {
     const bins = index?.histogram?.bins ?? [];
@@ -254,6 +416,13 @@ export default function App() {
             onGeometry={setGeometry}
             onFinish={() => setMode("none")}
             onCursor={(lat, lng, zoom) => setCursor({ lat, lng, zoom })}
+            features={visibleFeatures}
+            landcover={
+              overlay ? { url: overlay.image_url, bounds: overlay.bounds } : null
+            }
+            buildings={overlay?.buildings ?? null}
+            showLandcover={showLandcover}
+            showBuildings={showBuildings}
           />
 
           {view3d && (
@@ -330,7 +499,12 @@ export default function App() {
                 <IconLayers />
                 Layers
               </span>
-              <span className="layer-count">{geometry ? 1 : 0}</span>
+              <span className="layer-count">
+                {1 +
+                  Number(Boolean(overlay)) +
+                  Number(Boolean(overlay?.buildings)) +
+                  featureLayers.length}
+              </span>
             </header>
             <ul>
               <li className={geometry ? "" : "is-empty"}>
@@ -355,6 +529,75 @@ export default function App() {
                   </span>
                 </div>
               </li>
+              {overlay && (
+                <li className={showLandcover ? "" : "is-empty"}>
+                  <i className="dot" style={{ background: "#397D49" }} />
+                  <div>
+                    <strong>Land cover</strong>
+                    <span>
+                      {overlay.classes.length} classes · {overlay.scene_count} scenes
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="layer-toggle"
+                    onClick={() => setShowLandcover((value) => !value)}
+                  >
+                    {showLandcover ? "Hide" : "Show"}
+                  </button>
+                </li>
+              )}
+              {featureLayers.map((layer) => {
+                const visible = !hiddenFeatures[layer.category];
+                return (
+                  <li key={layer.category} className={visible ? "" : "is-empty"}>
+                    <i
+                      className="dot"
+                      style={{ background: layer.category === "roads" ? "#f59e0b" : "#8b5cf6" }}
+                    />
+                    <div>
+                      <strong>{layer.label}</strong>
+                      <span>
+                        {layer.count.toLocaleString("en-IN")}
+                        {layer.truncated ? ` (first ${layer.limit.toLocaleString("en-IN")})` : ""} · OSM
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="layer-toggle"
+                      onClick={() =>
+                        setHiddenFeatures((current) => ({
+                          ...current,
+                          [layer.category]: !current[layer.category],
+                        }))
+                      }
+                    >
+                      {visible ? "Hide" : "Show"}
+                    </button>
+                  </li>
+                );
+              })}
+              {overlay?.buildings && overlay.buildings.returned > 0 && (
+                <li className={showBuildings ? "" : "is-empty"}>
+                  <i className="dot" style={{ background: "#c4281b" }} />
+                  <div>
+                    <strong>Buildings</strong>
+                    <span>
+                      {overlay.buildings.returned.toLocaleString("en-IN")}
+                      {overlay.buildings.total !== null &&
+                        ` of ${overlay.buildings.total.toLocaleString("en-IN")}`}
+                      {overlay.buildings.truncated ? " drawn" : " footprints"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="layer-toggle"
+                    onClick={() => setShowBuildings((value) => !value)}
+                  >
+                    {showBuildings ? "Hide" : "Show"}
+                  </button>
+                </li>
+              )}
             </ul>
             <p className="layer-hint">
               {view3d
@@ -413,10 +656,19 @@ export default function App() {
                 Results
                 {resultCount > 0 && <span className="tab-count">{resultCount}</span>}
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "assistant"}
+                className={tab === "assistant" ? "is-active" : ""}
+                onClick={() => setTab("assistant")}
+              >
+                Ask
+              </button>
             </div>
           </div>
 
-          <div className="panel-body">
+          <div className={tab === "assistant" ? "panel-body chat-body" : "panel-body"}>
             {error && (
               <div className="alert" role="alert">
                 <span>{error}</span>
@@ -426,7 +678,61 @@ export default function App() {
               </div>
             )}
 
-            {tab === "tools" ? (
+            {tab === "assistant" ? (
+              <>
+                <div className="chat-log">
+                  {messages.length === 0 && (
+                    <div className="chat-intro">
+                      <h3>Ask for something to be marked</h3>
+                      <p>
+                        Buildings, roads, monuments, water, trees, built-up area, a spectral index
+                        or population — for the area you have drawn. Commands are matched to data
+                        this deployment actually has.
+                      </p>
+                    </div>
+                  )}
+                  {messages.map((message, position) => (
+                    <div key={position} className={`chat-msg chat-msg-${message.role}`}>
+                      {message.text}
+                    </div>
+                  ))}
+                  {chatBusy && <div className="chat-msg chat-msg-agent is-busy">Working…</div>}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <div className="chat-suggestions">
+                  {SUGGESTIONS.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      className="chip"
+                      onClick={() => void ask(suggestion)}
+                      disabled={chatBusy}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+
+                <form
+                  className="chat-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void ask(draft);
+                  }}
+                >
+                  <input
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder="e.g. mark all buildings"
+                    aria-label="Ask for an area to be marked"
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={!draft.trim() || chatBusy}>
+                    Send
+                  </button>
+                </form>
+              </>
+            ) : tab === "tools" ? (
               <>
                 <section className="section">
                   <div className="section-head">

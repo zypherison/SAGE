@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import type { GeoJsonObject } from "geojson";
 import type { PolygonGeometry } from "./types";
 
 export type DrawMode = "none" | "rect" | "polygon";
@@ -11,6 +12,11 @@ interface Props {
   onGeometry: (geometry: PolygonGeometry) => void;
   onFinish: () => void;
   onCursor: (lat: number, lng: number, zoom: number) => void;
+  landcover: { url: string; bounds: [[number, number], [number, number]] } | null;
+  buildings: { type: "FeatureCollection"; features: unknown[] } | null;
+  showLandcover: boolean;
+  showBuildings: boolean;
+  features: { category: string; type: "FeatureCollection"; features: unknown[] }[];
 }
 
 /**
@@ -56,10 +62,24 @@ const closeRing = (verts: L.LatLng[]): PolygonGeometry => {
   return { type: "Polygon", coordinates: [ring] };
 };
 
-export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCursor }: Props) {
+export default function MapCanvas({
+  geometry,
+  mode,
+  onGeometry,
+  onFinish,
+  onCursor,
+  landcover,
+  buildings,
+  showLandcover,
+  showBuildings,
+  features,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const aoiRef = useRef<L.LayerGroup | null>(null);
+  const landcoverRef = useRef<L.ImageOverlay | null>(null);
+  const buildingsRef = useRef<L.GeoJSON | null>(null);
+  const featuresRef = useRef<L.LayerGroup | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
   const labelRef = useRef<L.TileLayer | null>(null);
   const [basemap, setBasemap] = useState<string>(BASEMAPS[0].id);
@@ -249,12 +269,75 @@ export default function MapCanvas({ geometry, mode, onGeometry, onFinish, onCurs
       color: "#1d4ed8",
       weight: 2,
       fillColor: "#1d4ed8",
-      fillOpacity: 0.07,
+      fillOpacity: 0.03,
     }).addTo(layer);
     if (map.getSize().x > 0) {
       map.fitBounds(L.latLngBounds(latlngs as [number, number][]).pad(0.4), { maxZoom: 14 });
     }
   }, [geometry]);
+
+  // Land-cover PNG from Earth Engine: one image, not nine polygon layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    landcoverRef.current?.remove();
+    landcoverRef.current = null;
+    if (!landcover || !showLandcover) return;
+    landcoverRef.current = L.imageOverlay(landcover.url, landcover.bounds, {
+      opacity: 0.42,
+      interactive: false,
+    }).addTo(map);
+  }, [landcover, showLandcover]);
+
+  // Building footprints arrive as GeoJSON from Open Buildings.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    buildingsRef.current?.remove();
+    buildingsRef.current = null;
+    if (!buildings || !showBuildings || buildings.features.length === 0) return;
+    buildingsRef.current = L.geoJSON(buildings as unknown as GeoJsonObject, {
+      style: {
+        color: "#7f1d1d",
+        weight: 0.9,
+        fillColor: "#c4281b",
+        fillOpacity: 0.12,
+      },
+      interactive: false,
+    }).addTo(map);
+  }, [buildings, showBuildings]);
+
+  // Chat-driven OSM layers: roads as lines, monuments as points. Each category
+  // keeps its own GeoJSON so marking roads does not erase the monuments.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    featuresRef.current?.remove();
+    featuresRef.current = null;
+    if (features.length === 0) return;
+    const group = L.layerGroup().addTo(map);
+    features.forEach((layer) => {
+      if (layer.features.length === 0) return;
+      L.geoJSON(layer as unknown as GeoJsonObject, {
+        pointToLayer: (_feature, latlng) =>
+          L.circleMarker(latlng, {
+            radius: 4.5,
+            weight: 1,
+            color: "#4c1d95",
+            fillColor: "#8b5cf6",
+            fillOpacity: 0.95,
+          }),
+        style: (feature) => {
+          const type = (feature as { geometry?: { type?: string } } | undefined)?.geometry?.type;
+          if (type === "LineString") {
+            return { color: "#f59e0b", weight: 1.4, opacity: 0.85 };
+          }
+          return { color: "#4c1d95", weight: 1.2, fillColor: "#8b5cf6", fillOpacity: 0.3 };
+        },
+      }).addTo(group);
+    });
+    featuresRef.current = group;
+  }, [features]);
 
   return (
     <div className="map-canvas">

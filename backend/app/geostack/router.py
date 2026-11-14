@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,18 @@ class LandcoverRequest(BaseModel):
     date_to: str
     scale: int = 10
     buildings: bool = True
+
+
+class FeatureRequest(BaseModel):
+    geometry: dict[str, Any]
+    category: str
+    limit: int = 3000
+
+
+class LandcoverOverlayRequest(LandcoverRequest):
+    size: int = 1600
+    include_buildings: bool = True
+    buildings_limit: int = 3000
 
 
 def _check_area(vector: Any, geometry: dict[str, Any]) -> dict[str, Any]:
@@ -314,6 +327,79 @@ def earth_landcover(body: LandcoverRequest) -> dict[str, Any]:
         scale=body.scale,
         buildings=body.buildings,
     )
+
+
+@router.post("/landcover/overlay")
+def landcover_overlay(body: LandcoverOverlayRequest) -> dict[str, Any]:
+    vector = _load("vector")
+    earth = _load("earth")
+
+    _check_area(vector, body.geometry)
+    started = time.time()
+    overlay = earth.landcover_overlay(
+        body.geometry, date_from=body.date_from, date_to=body.date_to, size=body.size
+    )
+
+    directory = Path(config.MAP_DIR) / "overlays"
+    directory.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(
+        f"{body.geometry}|{body.date_from}|{body.date_to}|{body.size}".encode()
+    ).hexdigest()[:16]
+    path = directory / f"{digest}.png"
+    path.write_bytes(overlay["png"])
+
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "image_url": f"/api/geo/overlay/{path.name}",
+        "bytes": len(overlay["png"]),
+        "bounds": overlay["bounds"],
+        "scene_count": overlay["scene_count"],
+        "classes": [
+            {"id": entry["id"], "name": entry["name"], "color": entry["color"]}
+            for entry in earth.LAND_COVER
+        ],
+        "elapsed_seconds": round(time.time() - started, 2),
+    }
+    if body.include_buildings:
+        try:
+            payload["buildings"] = earth.building_footprints(
+                body.geometry, limit=body.buildings_limit
+            )
+        except AppError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - overlay must survive a dataset hiccup
+            payload["buildings"] = {
+                "type": "FeatureCollection",
+                "features": [],
+                "total": None,
+                "returned": 0,
+                "truncated": False,
+                "error": type(exc).__name__,
+            }
+    return payload
+
+
+@router.get("/overlay/{name}")
+def serve_overlay(name: str) -> FileResponse:
+    if not name.endswith(".png") or len(name) != 20:
+        raise AppError(INVALID_ARGUMENTS, "overlay name must be a 16-character hex id plus .png")
+    try:
+        int(name[:16], 16)
+    except ValueError:
+        raise AppError(INVALID_ARGUMENTS, "overlay name must be a 16-character hex id plus .png") from None
+    path = Path(config.MAP_DIR) / "overlays" / name
+    if not path.exists():
+        raise AppError("evidence_not_found", f"no overlay named {name}")
+    return FileResponse(path, media_type="image/png")
+
+
+@router.post("/features")
+def osm_features(body: FeatureRequest) -> dict[str, Any]:
+    vector = _load("vector")
+    osm = _load("osm")
+
+    _check_area(vector, body.geometry)
+    return osm.fetch(body.geometry, body.category, limit=body.limit)
 
 
 # --------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 import type {
   AoiMetrics,
   Capabilities,
+  FeatureLayer,
   IndexResult,
+  LandcoverOverlay,
   LandcoverResult,
   MapResult,
   PolygonGeometry,
@@ -59,6 +61,18 @@ export const runPopulation = (geometry: PolygonGeometry, iso3: string, year: num
 
 export const runLandcover = (geometry: PolygonGeometry, dateFrom: string, dateTo: string) =>
   post<LandcoverResult>("/api/geo/landcover", {
+    geometry,
+    date_from: dateFrom,
+    date_to: dateTo,
+  });
+
+export const runFeatures = (
+  geometry: PolygonGeometry,
+  category: "roads" | "monuments",
+) => post<FeatureLayer>("/api/geo/features", { geometry, category });
+
+export const runLandcoverOverlay = (geometry: PolygonGeometry, dateFrom: string, dateTo: string) =>
+  post<LandcoverOverlay>("/api/geo/landcover/overlay", {
     geometry,
     date_from: dateFrom,
     date_to: dateTo,

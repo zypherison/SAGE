@@ -50,6 +50,8 @@ problem (an installable desktop GIS) and would be scope without purpose here.
 | POST | `/api/geo/population` | WorldPop population inside the AOI, with the raster's provenance |
 | POST | `/api/geo/composite` | Earth Engine median composite over a window (503 until configured) |
 | POST | `/api/geo/landcover` | Dynamic World class areas, plus an Open Buildings structure count |
+| POST | `/api/geo/landcover/overlay` | palette class PNG + simplified Open Buildings GeoJSON for drawing on the map |
+| POST | `/api/geo/features` | OSM roads or monuments as GeoJSON, via Overpass |
 | POST | `/api/geo/map` | writes an interactive geemap HTML map, optionally with EE and land-cover layers |
 | GET | `/api/geo/map/{id}` | serves that map |
 | GET | `/api/geo/preview/{id}` | serves an index PNG |
@@ -239,10 +241,44 @@ The catalogue id is `GOOGLE/DYNAMICWORLD/V1`; the older spaced
 which is why that error arrives as a 500 rather than a 503 — the credentials are
 fine, the dataset name was not.
 
+### Drawing, not just reporting, 2026-11-14
+
+`/landcover/overlay` renders the modal class raster server-side (Earth Engine
+thumbnail, palette of the nine classes) and returns it with bounds, plus up to
+3,000 simplified Open Buildings footprints. Measured on the 5.6 km² AOI: 200 in
+22 s, a 40,851-byte PNG and 967 KB of GeoJSON for 3,000 buildings — while the true
+count was 51,536, so the response says `truncated: true` rather than implying the
+layer is complete.
+
+`/features` covers what no raster can name. Overpass is called with GET, because
+the same host answers a form POST without an explicit content type with 406
+(measured). On the Hussain Sagar box: 638 road segments in 32 s and 20 monuments
+and landmarks in 29 s. Two honest limits: OSM completeness is whatever mappers
+recorded, and relations are skipped because their member geometry needs resolving.
+The `monuments` category is really *monuments and landmarks* — it includes
+`tourism=attraction` with a name, which is why "Snow world" appears beside statues.
+
+### 3D
+
+MapLibre renders satellite over Terrarium terrain, framed to the drawn AOI with
+orbit and pitch. The land-cover PNG is deliberately **not** draped: an image source
+with terrain enabled draws as a flat quad, most of it occluded by relief, which read
+as a grey wash over the selected area (measured, then removed). 3D keeps imagery,
+relief and the AOI outline; the class map is a 2D layer.
+
+### Chat box
+
+The **Ask** tab parses plain commands deterministically (`frontend-geo/src/assistant.ts`)
+and routes them to the endpoints above: buildings, roads, monuments, water, trees,
+built-up, crops, land cover, any of the five indices, or population. It is not a
+language model, so an unrecognised sentence returns the capability list instead of an
+invented action, and every reply is the number the API measured. Multiple OSM layers
+coexist and each has its own show/hide in the layer panel.
+
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests -q        # 170 pass, 32 of them geostack
+.venv/bin/python -m pytest tests -q        # 175 pass, 37 of them geostack
 ```
 
 ## Starting with credentials loaded
@@ -261,8 +297,8 @@ is not an error: the API starts and Earth Engine endpoints report 503.
 
 The geostack tests are offline: synthetic GeoTIFFs for the raster and WorldPop
 maths, a bow-tie polygon for repair, fake STAC items for the reflectance
-convention, and a 503 assertion for unconfigured Earth Engine. Nothing in the suite
-needs a credential or a network.
+convention, Overpass element-to-GeoJSON conversion, and a 503 assertion for
+unconfigured Earth Engine. Nothing in the suite needs a credential or a network.
 
 ## Limits
 

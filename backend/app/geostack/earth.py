@@ -14,6 +14,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import httpx
+
 from app.errors import GEOSTACK_UNAVAILABLE, NO_IMAGERY, AppError
 from app.geostack import capabilities, raster
 
@@ -236,6 +238,104 @@ def landcover_image(geometry: dict[str, Any], *, date_from: str, date_to: str):
             window={"from": date_from, "to": date_to},
         )
     return collection.select("label").mode().rename("landcover")
+
+
+def landcover_overlay(
+    geometry: dict[str, Any],
+    *,
+    date_from: str,
+    date_to: str,
+    size: int = 1600,
+) -> dict[str, Any]:
+    """A palette-rendered PNG of the modal land-cover classes, plus its bounds.
+
+    Earth Engine does the rendering server-side, so the browser gets one image
+    instead of nine polygon layers. The bounds are the AOI bbox from the request,
+    which is what an image overlay needs to line itself up.
+    """
+    ee = init()
+    geom = _geometry(ee, geometry)
+    collection = _landcover_collection(ee, geom, date_from, date_to)
+    scene_count = int(collection.size().getInfo())
+    if scene_count == 0:
+        raise AppError(
+            NO_IMAGERY,
+            "Dynamic World has no land-cover image for the AOI and window",
+            window={"from": date_from, "to": date_to},
+        )
+
+    label = collection.select("label").mode()
+    thumb_url = label.getThumbURL(
+        {
+            "min": 0,
+            "max": 8,
+            "palette": LAND_COVER_PALETTE,
+            "region": geom,
+            "dimensions": int(size),
+            "format": "png",
+        }
+    )
+    try:
+        response = httpx.get(thumb_url, timeout=180, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise AppError(NO_IMAGERY, f"Earth Engine thumbnail failed: {exc}") from exc
+
+    ring = (geometry.get("coordinates") or [[]])[0]
+    if not ring:
+        raise AppError(NO_IMAGERY, "geometry has no exterior ring")
+    lons = [float(point[0]) for point in ring]
+    lats = [float(point[1]) for point in ring]
+    return {
+        "png": response.content,
+        "bounds": [[min(lats), min(lons)], [max(lats), max(lons)]],
+        "scene_count": scene_count,
+    }
+
+
+def building_footprints(
+    geometry: dict[str, Any],
+    *,
+    confidence: float = 0.7,
+    limit: int = 3000,
+    simplify_m: float = 2.0,
+) -> dict[str, Any]:
+    """Open Buildings polygons as GeoJSON, simplified for a browser overlay.
+
+    The count is always the true count; `returned` says how many outlines came
+    back, so a truncated layer is never presented as the complete set.
+    """
+    ee = init()
+    geom = _geometry(ee, geometry)
+    collection = (
+        ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
+        .filterBounds(geom)
+        .filter(ee.Filter.gte("confidence", confidence))
+    )
+    total = int(collection.size().getInfo())
+    if total == 0:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "total": 0,
+            "returned": 0,
+            "truncated": False,
+            "confidence": confidence,
+        }
+
+    simplified = collection.limit(limit).map(
+        lambda feature: ee.Feature(feature.geometry().simplify(simplify_m))
+    )
+    data = simplified.getInfo() or {}
+    features = data.get("features", [])
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "total": total,
+        "returned": len(features),
+        "truncated": total > limit,
+        "confidence": confidence,
+    }
 
 
 def landcover(

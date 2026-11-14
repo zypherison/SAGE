@@ -12,6 +12,11 @@ import type { PolygonGeometry } from "./types";
  * Terrain is exaggerated 1.4x: at 10 m imagery over a city, real relief is close to
  * invisible at screen scale, and pretending otherwise would give a flat-looking
  * "3D" view rather than a legible one.
+ *
+ * The land-cover PNG is deliberately not draped here. An image source with terrain
+ * enabled is drawn as a flat quad, so most of it is occluded by the hills and the
+ * result reads as a grey wash (measured 2026-11-14). The class map belongs to the
+ * 2D surface; 3D keeps the imagery, the relief and the AOI outline only.
  */
 const SATELLITE =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -51,7 +56,7 @@ export default function TerrainView({ geometry }: { geometry: PolygonGeometry | 
           id: "aoi-fill",
           type: "fill",
           source: "aoi",
-          paint: { "fill-color": "#1d4ed8", "fill-opacity": 0.14 },
+          paint: { "fill-color": "#1d4ed8", "fill-opacity": 0.02 },
         },
         {
           id: "aoi-line",
@@ -112,7 +117,5 @@ export default function TerrainView({ geometry }: { geometry: PolygonGeometry | 
 
     if (map.loaded()) apply();
     else map.once("load", apply);
-  }, [geometry]);
-
-  return <div ref={hostRef} className="terrain-canvas" />;
+  }, [geometry]);  return <div ref={hostRef} className="terrain-canvas" />;
 }
